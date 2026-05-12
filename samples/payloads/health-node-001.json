@@ -1,0 +1,34 @@
+{
+  "device_id": "node-001",
+  "timestamp": "2026-05-12T12:05:00Z",
+  "status": "ok",
+  "uptime_seconds": 420,
+  "battery": {
+    "voltage": 3.91,
+    "percentage": 72,
+    "charging": false,
+    "estimated_hours_remaining": 96.0
+  },
+  "storage": {
+    "free_bytes": 14953358131,
+    "used_bytes": 524288000,
+    "total_bytes": 15477646131,
+    "media_count": 1
+  },
+  "radio": {
+    "rssi": -61,
+    "snr": 8.5,
+    "packet_loss": 0.0,
+    "last_seen_at": "2026-05-12T12:05:00Z"
+  },
+  "environment": {
+    "temperature_c": 11.8,
+    "humidity_percent": 54.2,
+    "pressure_hpa": 842.3
+  },
+  "errors": [],
+  "metadata": {
+    "profile": "phase1-simulator",
+    "simulated": true
+  }
+}

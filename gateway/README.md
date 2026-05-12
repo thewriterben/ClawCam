@@ -23,6 +23,33 @@ Environment variables:
 | `CLAWCAM_PORT` | `8080` | API port. |
 | `CLAWCAM_GATEWAY_ID` | `local-gateway` | Gateway identity. |
 
+## Phase 1 Simulator Flow
+
+Generate deterministic sample payloads without hardware:
+
+```bash
+cd gateway
+PYTHONPATH=. python -m clawcam_gateway.simulator.cli --output ../samples/node-simulator
+```
+
+Import either the hand-authored samples or generated simulator payloads into a local database:
+
+```bash
+cd gateway
+PYTHONPATH=. python -m clawcam_gateway.ingest.cli import-sample ../samples/payloads --db ../clawcam_gateway.db
+PYTHONPATH=. python -m clawcam_gateway.ingest.cli import-sample ../samples/node-simulator --db ../clawcam_gateway.db
+```
+
+Use the Python tool functions directly from tests or adapter code:
+
+```python
+from clawcam_gateway.tools import ToolContext, get_recent_detections, get_node_health
+
+context = ToolContext(database_path="../clawcam_gateway.db")
+print(get_recent_detections(context, limit=10))
+print(get_node_health(context, "node-001"))
+```
+
 ## Initial API
 
 | Method | Path | Purpose |

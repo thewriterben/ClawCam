@@ -1,0 +1,40 @@
+{
+  "device_id": "node-001",
+  "device_type": "node",
+  "name": "North Ridge Camera",
+  "status": "active",
+  "created_at": "2026-05-12T12:00:00Z",
+  "last_seen_at": "2026-05-12T12:05:00Z",
+  "deployment_id": "deploy-north-ridge-2026",
+  "capabilities": [
+    "capture",
+    "motion",
+    "battery",
+    "storage",
+    "environment"
+  ],
+  "hardware": {
+    "board": "esp32-s3-camera",
+    "mcu": "esp32-s3",
+    "camera": "ov2640",
+    "psram_mb": 8,
+    "storage": "microsd"
+  },
+  "firmware": {
+    "name": "clawcam-node",
+    "version": "0.1.0-sim",
+    "build": "simulator",
+    "source": "samples/node-simulator"
+  },
+  "location": {
+    "latitude": 45.5123,
+    "longitude": -110.9012,
+    "altitude_m": 1492.0,
+    "sensitive": true,
+    "label": "North Ridge"
+  },
+  "metadata": {
+    "profile": "phase1-simulator",
+    "notes": "Representative device payload for ClawCam Phase 1 vertical slice."
+  }
+}

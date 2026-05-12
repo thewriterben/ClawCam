@@ -4,6 +4,8 @@ ClawCam should expose gateway data and safe operations through an MCP server so 
 
 ## Initial MCP Tools
 
+The shared Python dispatcher for these tools starts in `gateway/clawcam_gateway/mcp_server/tool_dispatch.py`. It is not a complete MCP server yet, but it gives future MCP, HTTP, and Oh-Ben-Claw adapters a single implementation path.
+
 | Tool | Purpose | Approval |
 |---|---|---|
 | `get_recent_detections` | Return recent event and observation summaries. | Not required. |

@@ -18,6 +18,10 @@ The gateway remains the system of record for field data. The brain calls gateway
 | `propose_config_patch` | Generate a safe configuration proposal. | Yes before apply |
 | `apply_config_patch` | Apply approved configuration change. | Yes |
 
+## Current Implementation
+
+The first-pass gateway tool functions now live in `gateway/clawcam_gateway/tools/clawcam_tools.py`. They provide direct Python callables for `get_recent_detections`, `get_node_health`, `generate_daily_summary`, and structured not-yet-implemented responses for approval-gated operations such as `capture_now` and `apply_config_patch`.
+
 ## Next Implementation Step
 
-Create a small MCP server in `gateway/clawcam_gateway/mcp_server/` that maps these tools to gateway storage/API calls. Then add Oh-Ben-Claw examples showing how to connect to that MCP server or call the gateway HTTP endpoints directly.
+Create a small MCP server in `gateway/clawcam_gateway/mcp_server/` that wraps these gateway tool functions. Then add Oh-Ben-Claw examples showing how to connect to that MCP server or call the gateway HTTP endpoints directly.
