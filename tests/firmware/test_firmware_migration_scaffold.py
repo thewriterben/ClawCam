@@ -68,6 +68,25 @@ def test_camera_component_exposes_esp32_camera_integration_gate() -> None:
     assert "esp_camera_fb_get" in camera_source
     assert "clawcam_camera_default_esp32_s3_eye_config" in camera_header
     assert "CLAWCAM_CAMERA_USE_ESP_CAMERA" in kconfig
+    assert "CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT" in kconfig
+    assert "CLAWCAM_CAMERA_SMOKE_TEST_RETRY_COUNT" in kconfig
+
+
+def test_esp32_s3_eye_build_defaults_enable_hardware_smoke_test_profile() -> None:
+    defaults = (ROOT / "firmware/clawcam_node_espidf/sdkconfig.defaults.esp32s3_eye").read_text(encoding="utf-8")
+    assert 'CONFIG_IDF_TARGET="esp32s3"' in defaults
+    assert "CONFIG_SPIRAM=y" in defaults
+    assert "CONFIG_CLAWCAM_CAMERA_USE_ESP_CAMERA=y" in defaults
+    assert "CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT=y" in defaults
+
+
+def test_firmware_main_contains_safe_capture_smoke_test_flow() -> None:
+    main_source = (ROOT / "firmware/clawcam_node_espidf/main/main.c").read_text(encoding="utf-8")
+    assert "run_camera_smoke_test" in main_source
+    assert "clawcam_camera_capture(&capture)" in main_source
+    assert "camera smoke test passed" in main_source
+    assert "clawcam_camera_release(&capture)" in main_source
+    assert "CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT" in main_source
 
 
 def test_oh_ben_claw_example_config_documents_stdio_bridge() -> None:
