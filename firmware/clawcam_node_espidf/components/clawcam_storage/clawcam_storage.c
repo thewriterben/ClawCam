@@ -50,6 +50,11 @@ static const char *metadata_dir(void)
     return s_config.metadata_dir ? s_config.metadata_dir : "metadata";
 }
 
+static const char *events_dir(void)
+{
+    return s_config.events_dir ? s_config.events_dir : "events";
+}
+
 static esp_err_t mkdir_if_needed(const char *path)
 {
     if (path == NULL) {
@@ -74,6 +79,11 @@ static esp_err_t ensure_storage_dirs(void)
     if (written < 0 || (size_t)written >= sizeof(path)) {
         return ESP_ERR_INVALID_SIZE;
     }
+    ESP_RETURN_ON_ERROR(mkdir_if_needed(path), TAG, "create metadata directory");
+    written = snprintf(path, sizeof(path), "%s/%s", s_config.mount_point, events_dir());
+    if (written < 0 || (size_t)written >= sizeof(path)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
     return mkdir_if_needed(path);
 }
 
@@ -86,6 +96,7 @@ esp_err_t clawcam_storage_default_esp32_s3_eye_config(clawcam_storage_config_t *
     config->mount_point = "/sdcard";
     config->media_dir = "media";
     config->metadata_dir = "metadata";
+    config->events_dir = "events";
     config->min_free_bytes = 128 * 1024 * 1024;
     config->auto_cleanup_enabled = false;
     config->bus = CLAWCAM_STORAGE_BUS_SDMMC_1BIT;
@@ -219,6 +230,42 @@ esp_err_t clawcam_storage_save_metadata(const char *media_path, const char *json
     return ESP_OK;
 #else
     ESP_LOGW(TAG, "metadata save is scaffolded for media path %s", media_path);
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
+esp_err_t clawcam_storage_save_event_json(const char *event_id, const char *json_event, char *out_path, size_t out_path_len)
+{
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (event_id == NULL || json_event == NULL || out_path == NULL || out_path_len == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    int written = snprintf(out_path, out_path_len, "%s/%s/%s.json", s_config.mount_point, events_dir(), event_id);
+    if (written < 0 || (size_t)written >= out_path_len) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+#if CONFIG_CLAWCAM_STORAGE_USE_FATFS_SDMMC && CLAWCAM_HAVE_FATFS_SDMMC
+    if (!s_mounted) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    FILE *file = fopen(out_path, "w");
+    if (file == NULL) {
+        ESP_LOGE(TAG, "failed to open event path %s: errno=%d", out_path, errno);
+        return ESP_FAIL;
+    }
+    int rc = fputs(json_event, file);
+    fclose(file);
+    if (rc < 0) {
+        ESP_LOGE(TAG, "failed to write event path %s", out_path);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "saved event artifact %s", out_path);
+    return ESP_OK;
+#else
+    ESP_LOGW(TAG, "event save is scaffolded for event %s", event_id);
     return ESP_ERR_NOT_SUPPORTED;
 #endif
 }

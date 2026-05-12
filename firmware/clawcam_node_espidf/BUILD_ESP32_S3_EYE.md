@@ -28,7 +28,7 @@ idf.py -p /dev/ttyACM0 flash monitor
 
 ## Expected Smoke-Test Behavior
 
-When `CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT=y`, the firmware should initialize the ESP32-S3-EYE camera pin map, attempt one JPEG capture, log the captured frame length and dimensions, and release the framebuffer. If `CONFIG_CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE=y`, a successful capture is also written to `/sdcard/media` and paired JSON metadata is written to `/sdcard/metadata`. If the camera or storage driver is disabled or unavailable, the firmware logs the failure and uses `ESP_ERR_NOT_SUPPORTED` or a concrete ESP-IDF error rather than pretending success.
+When `CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT=y`, the firmware should initialize the ESP32-S3-EYE camera pin map, attempt one JPEG capture, log the captured frame length and dimensions, and release the framebuffer. If `CONFIG_CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE=y`, a successful capture is also written to `/sdcard/media`, paired smoke-test metadata is written to `/sdcard/metadata`, and a gateway-ingestible `clawcam.event.v1`-shape event artifact is written to `/sdcard/events`. If the camera or storage driver is disabled or unavailable, the firmware logs the failure and uses `ESP_ERR_NOT_SUPPORTED` or a concrete ESP-IDF error rather than pretending success.
 
 ## Promotion Criteria
 
@@ -42,7 +42,8 @@ When `CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT=y`, the firmware should initializ
 | Storage mount | SD/FATFS mounts at `/sdcard` without formatting unless formatting was explicitly enabled for bench testing. |
 | Media persistence | Captured JPEG is saved under `/sdcard/media`. |
 | Metadata persistence | JSON metadata is saved under `/sdcard/metadata`. |
-| Next port | Persisted metadata can be transformed into the ClawCam gateway event schema. |
+| Event artifact | Gateway-compatible event JSON is saved under `/sdcard/events`. |
+| Next port | Persisted event artifacts can be imported by or transmitted to the ClawCam gateway. |
 
 ## References
 

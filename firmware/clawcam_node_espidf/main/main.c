@@ -15,6 +15,7 @@
 #include "esp_timer.h"
 
 #include "clawcam_camera.h"
+#include "clawcam_events.h"
 #include "clawcam_motion.h"
 #include "clawcam_power.h"
 #include "clawcam_storage.h"
@@ -101,7 +102,39 @@ static void persist_smoke_test_capture(const clawcam_camera_capture_t *capture)
         ESP_LOGW(TAG, "smoke-test metadata was not persisted: %s", esp_err_to_name(err));
         return;
     }
-    ESP_LOGI(TAG, "smoke-test capture persisted: %s", media_path);
+
+    char event_id[80];
+    snprintf(event_id, sizeof(event_id), "evt-%s", media_id);
+    const clawcam_event_capture_t event = {
+        .event_id = event_id,
+        .event_type = "capture",
+        .device_id = "esp32-s3-eye-v2.2-bench-node",
+        .deployment_id = "hardware-bench",
+        .timestamp = "1970-01-01T00:00:00Z",
+        .time_source = "unknown",
+        .media_id = media_id,
+        .media_path = media_path,
+        .mime_type = capture->mime_type ? capture->mime_type : "image/jpeg",
+        .size_bytes = capture->length,
+        .width = capture->width,
+        .height = capture->height,
+        .trigger = "camera_smoke_test",
+        .board_profile = "esp32-s3-eye-v2.2",
+        .capture_profile = "smoke_test",
+    };
+    char event_json[1024];
+    err = clawcam_event_build_capture_json(&event, event_json, sizeof(event_json));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "smoke-test event JSON was not generated: %s", esp_err_to_name(err));
+        return;
+    }
+    char event_path[192];
+    err = clawcam_storage_save_event_json(event_id, event_json, event_path, sizeof(event_path));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "smoke-test event artifact was not persisted: %s", esp_err_to_name(err));
+        return;
+    }
+    ESP_LOGI(TAG, "smoke-test capture persisted: media=%s event=%s", media_path, event_path);
 #else
     (void)capture;
     ESP_LOGI(TAG, "smoke-test storage persistence disabled; enable CONFIG_CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE for bench validation");
