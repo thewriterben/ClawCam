@@ -28,7 +28,7 @@ idf.py -p /dev/ttyACM0 flash monitor
 
 ## Expected Smoke-Test Behavior
 
-When `CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT=y`, the firmware should initialize the ESP32-S3-EYE camera pin map, attempt one JPEG capture, log the captured frame length and dimensions, and release the framebuffer. If `CONFIG_CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE=y`, a successful capture is also written to `/sdcard/media`, paired smoke-test metadata is written to `/sdcard/metadata`, and a gateway-ingestible `clawcam.event.v1`-shape event artifact is written to `/sdcard/events`. If the camera or storage driver is disabled or unavailable, the firmware logs the failure and uses `ESP_ERR_NOT_SUPPORTED` or a concrete ESP-IDF error rather than pretending success.
+When `CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT=y`, the firmware should initialize the ESP32-S3-EYE camera pin map, attempt one JPEG capture, log the captured frame length and dimensions, and release the framebuffer. If `CONFIG_CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE=y`, a successful capture is also written to `/sdcard/media`, paired smoke-test metadata is written to `/sdcard/metadata`, and a gateway-ingestible `clawcam.event.v1`-shape event artifact is written to `/sdcard/events`. If `CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED=y`, the firmware also attempts to register the bench node and POST the generated event JSON to the gateway API. SD-card artifacts remain the offline source of truth; upload failure is logged but does not delete or alter local artifacts. If the camera, storage, or gateway client path is disabled or unavailable, the firmware logs the failure and uses `ESP_ERR_NOT_SUPPORTED` or a concrete ESP-IDF error rather than pretending success.
 
 ## Promotion Criteria
 
@@ -43,7 +43,8 @@ When `CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT=y`, the firmware should initializ
 | Media persistence | Captured JPEG is saved under `/sdcard/media`. |
 | Metadata persistence | JSON metadata is saved under `/sdcard/metadata`. |
 | Event artifact | Gateway-compatible event JSON is saved under `/sdcard/events`. |
-| Next port | Persisted event artifacts can be imported by or transmitted to the ClawCam gateway. |
+| Optional upload | If enabled, firmware registers the node via `/api/v1/devices` and uploads the event via `/api/v1/events`. |
+| Next port | Add Wi-Fi provisioning so the upload path can run after a real network connection is established. |
 
 ## References
 

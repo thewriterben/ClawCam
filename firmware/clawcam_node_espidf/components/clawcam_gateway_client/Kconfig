@@ -1,0 +1,24 @@
+menu "ClawCam Gateway Client"
+
+config CLAWCAM_GATEWAY_UPLOAD_ENABLED
+    bool "Enable HTTP upload to ClawCam gateway"
+    default n
+    help
+        Enable the firmware-to-gateway HTTP upload path. SD/FATFS artifacts
+        remain the offline source of truth; failed uploads should not delete or
+        alter local artifacts.
+
+config CLAWCAM_GATEWAY_BASE_URL
+    string "ClawCam gateway base URL"
+    default "http://192.168.4.1:8080"
+    depends on CLAWCAM_GATEWAY_UPLOAD_ENABLED
+    help
+        Base URL for the local field gateway, without a trailing slash.
+
+config CLAWCAM_GATEWAY_HTTP_TIMEOUT_MS
+    int "Gateway HTTP timeout in milliseconds"
+    default 5000
+    range 1000 60000
+    depends on CLAWCAM_GATEWAY_UPLOAD_ENABLED
+
+endmenu
