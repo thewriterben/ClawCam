@@ -30,6 +30,7 @@ typedef struct {
     const char *mount_point;
     const char *media_dir;
     const char *metadata_dir;
+    const char *events_dir;
     uint64_t min_free_bytes;
     bool auto_cleanup_enabled;
     clawcam_storage_bus_t bus;
@@ -56,6 +57,7 @@ esp_err_t clawcam_storage_default_esp32_s3_eye_config(clawcam_storage_config_t *
 esp_err_t clawcam_storage_init(const clawcam_storage_config_t *config);
 esp_err_t clawcam_storage_save_media(const clawcam_storage_media_t *media, char *out_path, size_t out_path_len);
 esp_err_t clawcam_storage_save_metadata(const char *media_path, const char *json_metadata);
+esp_err_t clawcam_storage_save_event_json(const char *event_id, const char *json_event, char *out_path, size_t out_path_len);
 esp_err_t clawcam_storage_get_health(clawcam_storage_health_t *health);
 esp_err_t clawcam_storage_deinit(void);
 

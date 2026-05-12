@@ -114,6 +114,28 @@ def test_firmware_main_persists_smoke_test_capture_when_enabled() -> None:
     assert "CONFIG_CLAWCAM_STORAGE_USE_FATFS_SDMMC=y" in defaults
 
 
+def test_firmware_event_component_builds_gateway_compatible_event_artifacts() -> None:
+    event_header = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_events/include/clawcam_events.h").read_text(encoding="utf-8")
+    event_source = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_events/clawcam_events.c").read_text(encoding="utf-8")
+    storage_header = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_storage/include/clawcam_storage.h").read_text(encoding="utf-8")
+    storage_source = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_storage/clawcam_storage.c").read_text(encoding="utf-8")
+    main_source = (ROOT / "firmware/clawcam_node_espidf/main/main.c").read_text(encoding="utf-8")
+    main_cmake = (ROOT / "firmware/clawcam_node_espidf/main/CMakeLists.txt").read_text(encoding="utf-8")
+    assert "clawcam_event_capture_t" in event_header
+    assert "clawcam_event_build_capture_json" in event_header
+    assert "event_type" in event_source
+    assert "source" in event_source
+    assert "node" in event_source
+    assert "media" in event_source
+    assert "classifications" in event_source
+    assert "events_dir" in storage_header
+    assert "clawcam_storage_save_event_json" in storage_header
+    assert "events" in storage_source
+    assert "clawcam_event_build_capture_json" in main_source
+    assert "clawcam_storage_save_event_json" in main_source
+    assert "clawcam_events" in main_cmake
+
+
 def test_oh_ben_claw_example_config_documents_stdio_bridge() -> None:
     config = (ROOT / "brain/oh-ben-claw-adapter/examples/clawcam-mcp-stdio.toml").read_text(encoding="utf-8")
     assert "[mcp_servers.clawcam_gateway]" in config
