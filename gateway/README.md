@@ -50,6 +50,22 @@ print(get_recent_detections(context, limit=10))
 print(get_node_health(context, "node-001"))
 ```
 
+Run the gateway and open the local dashboard:
+
+```bash
+cd gateway
+PYTHONPATH=. python -m clawcam_gateway.main
+# Then open http://localhost:8080/dashboard
+```
+
+Call the HTTP tool-dispatch endpoint:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/tools/get_recent_detections \
+  -H 'Content-Type: application/json' \
+  -d '{"arguments":{"limit":10}}'
+```
+
 ## Initial API
 
 | Method | Path | Purpose |
@@ -60,3 +76,7 @@ print(get_node_health(context, "node-001"))
 | `POST` | `/api/v1/health` | Ingest node health telemetry. |
 | `GET` | `/api/v1/detections/recent` | Return recent event summaries. |
 | `GET` | `/api/v1/devices/{device_id}/health` | Return latest health for a device. |
+| `GET` | `/api/v1/tools` | List currently exposed ClawCam gateway tools. |
+| `POST` | `/api/v1/tools/{tool_name}` | Dispatch a ClawCam gateway tool over HTTP. |
+| `GET` | `/api/v1/dashboard` | Return dashboard summary data as JSON. |
+| `GET` | `/dashboard` | Render the no-build local HTML dashboard. |

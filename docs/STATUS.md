@@ -20,7 +20,7 @@ This document is the source of truth for current implementation maturity. ClawCa
 | Legacy archives | **Legacy Reference** | Original archives are retained under `legacy_archives/` and are not the active source of truth. |
 | Documentation | **Scaffold** | Core docs are being created as implementation guides. |
 | JSON schemas | **Scaffold** | Initial schema files define device, event, observation, and health contracts. |
-| Gateway service | **Scaffold** | Python package layout, API, SQLite persistence, schema validation, sample import CLI, and first MCP-style tool functions exist. Runtime is still local-development grade. |
+| Gateway service | **Scaffold** | Python package layout, API, SQLite persistence, schema validation, sample import CLI, first MCP-style tool functions, HTTP tool dispatch, dashboard JSON, and a minimal local HTML dashboard exist. Runtime is still local-development grade. |
 | Node simulator | **Working** | Deterministic simulator can generate schema-compatible device, event, and health payloads without hardware. |
 | Firmware | **Scaffold** | ESP-IDF component layout exists. Hardware code is not yet ported. |
 | Brain adapter | **Scaffold** | Oh-Ben-Claw/MCP tool definitions are being staged; first Python tool functions exist for recent detections, node health, and daily summary. |
@@ -33,4 +33,4 @@ ClawCam will not describe features as production-ready until they have implement
 
 ## First Milestone Definition
 
-The first milestone is a working vertical slice. It is partially implemented: a simulator can generate payloads, sample payloads exist, the gateway can validate and persist events, and Python tool functions can query recent detections and node health. It is complete only when this flow is also documented as an end-to-end runnable demo with either a live local API or hardware node path.
+The first milestone is substantially implemented for a simulator-based development loop: a simulator can generate payloads, sample payloads exist, the gateway can validate and persist events, Python and HTTP tool functions can query recent detections and node health, and a minimal local dashboard can render the gateway state. It is complete only when the same flow includes a real hardware node path and documented release-grade setup instructions.

@@ -187,6 +187,13 @@ class GatewayDatabase:
             ).fetchone()
         return json.loads(row["payload_json"]) if row else None
 
+    def list_devices(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT payload_json FROM devices ORDER BY name ASC, device_id ASC"
+            ).fetchall()
+        return [json.loads(row["payload_json"]) for row in rows]
+
     def latest_health(self, device_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute(
