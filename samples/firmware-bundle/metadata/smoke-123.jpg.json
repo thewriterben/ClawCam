@@ -1,0 +1,11 @@
+{
+  "schema_version": "clawcam.event.v1",
+  "event_type": "camera_smoke_test",
+  "media_id": "smoke-123",
+  "media_path": "/sdcard/media/smoke-123.jpg",
+  "bytes": 41,
+  "width": 1600,
+  "height": 1200,
+  "mime_type": "image/jpeg",
+  "source": "esp32-s3-eye-v2.2"
+}
