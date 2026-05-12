@@ -8,4 +8,21 @@ config CLAWCAM_CAMERA_USE_ESP_CAMERA
         in the ESP-IDF project. When disabled, the ClawCam camera component
         initializes in scaffold mode and capture returns ESP_ERR_NOT_SUPPORTED.
 
+config CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT
+    bool "Run one camera capture smoke test at boot"
+    default n
+    depends on CLAWCAM_CAMERA_USE_ESP_CAMERA
+    help
+        Run a single JPEG capture after camera initialization, log the frame
+        size, and release the framebuffer. This is intended for bench testing
+        the first ESP32-S3-EYE hardware camera path.
+
+config CLAWCAM_CAMERA_SMOKE_TEST_RETRY_COUNT
+    int "Camera smoke test retry count"
+    default 1
+    range 1 5
+    depends on CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT
+    help
+        Number of capture attempts during the boot-time smoke test.
+
 endmenu

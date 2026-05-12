@@ -1,0 +1,21 @@
+# ClawCam ESP32-S3-EYE v2.2 build defaults
+#
+# Use with:
+#   idf.py -D SDKCONFIG_DEFAULTS=sdkconfig.defaults.esp32s3_eye set-target esp32s3 build
+#
+# This profile enables the first hardware camera smoke-test path. It still
+# requires physical ESP32-S3-EYE hardware validation before the board can be
+# described as supported.
+
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_CLAWCAM_CAMERA_USE_ESP_CAMERA=y
+CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT=y
+CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_RETRY_COUNT=1
