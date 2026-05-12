@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clawcam.dev/schemas/clawcam-device.schema.json",
+  "title": "ClawCam Device",
+  "type": "object",
+  "required": ["device_id", "device_type", "name", "status", "created_at"],
+  "additionalProperties": false,
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable unique identifier for a camera node, gateway, or brain host."
+    },
+    "device_type": {
+      "type": "string",
+      "enum": ["node", "gateway", "brain", "sensor", "unknown"]
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hardware": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "board": {"type": "string"},
+        "mcu": {"type": "string"},
+        "camera": {"type": "string"},
+        "psram_mb": {"type": "number", "minimum": 0},
+        "storage": {"type": "string"}
+      }
+    },
+    "firmware": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "version": {"type": "string"},
+        "build": {"type": "string"},
+        "source": {"type": "string"}
+      }
+    },
+    "deployment_id": {"type": ["string", "null"]},
+    "capabilities": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true,
+      "default": []
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "inactive", "maintenance", "lost", "retired", "unknown"]
+    },
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "latitude": {"type": "number", "minimum": -90, "maximum": 90},
+        "longitude": {"type": "number", "minimum": -180, "maximum": 180},
+        "altitude_m": {"type": "number"},
+        "sensitive": {"type": "boolean", "default": true},
+        "label": {"type": "string"}
+      }
+    },
+    "created_at": {"type": "string", "format": "date-time"},
+    "last_seen_at": {"type": ["string", "null"], "format": "date-time"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    }
+  }
+}

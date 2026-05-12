@@ -1,0 +1,67 @@
+{
+  "version": "0.1.0",
+  "tools": [
+    {
+      "name": "get_recent_detections",
+      "description": "Return recent ClawCam events or detections from the gateway.",
+      "approval_required": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25}
+        }
+      }
+    },
+    {
+      "name": "get_node_health",
+      "description": "Return latest health telemetry for a ClawCam node.",
+      "approval_required": false,
+      "parameters": {
+        "type": "object",
+        "required": ["device_id"],
+        "properties": {
+          "device_id": {"type": "string"}
+        }
+      }
+    },
+    {
+      "name": "generate_daily_summary",
+      "description": "Generate a structured daily wildlife and device-health summary.",
+      "approval_required": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "date": {"type": "string", "description": "ISO date in YYYY-MM-DD format."},
+          "deployment_id": {"type": "string"}
+        }
+      }
+    },
+    {
+      "name": "capture_now",
+      "description": "Request a manual capture from a reachable ClawCam node.",
+      "approval_required": true,
+      "parameters": {
+        "type": "object",
+        "required": ["device_id"],
+        "properties": {
+          "device_id": {"type": "string"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    {
+      "name": "apply_config_patch",
+      "description": "Apply an approved configuration patch to a node or gateway.",
+      "approval_required": true,
+      "parameters": {
+        "type": "object",
+        "required": ["device_id", "patch"],
+        "properties": {
+          "device_id": {"type": "string"},
+          "patch": {"type": "object"},
+          "approval_id": {"type": "string"}
+        }
+      }
+    }
+  ]
+}

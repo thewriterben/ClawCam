@@ -1,0 +1,1 @@
+"""ClawCam gateway scaffold package."""

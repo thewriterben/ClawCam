@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Gateway runtime
+*.db
+*.db-shm
+*.db-wal
+media/
+uploads/
+
+# Firmware build outputs
+build/
+managed_components/
+sdkconfig
+sdkconfig.old
+
+# Node / frontend dependencies
+node_modules/
+dist/
+.next/
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Secrets
+.env
+*.pem
+*.key
+secrets.h
