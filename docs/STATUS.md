@@ -22,7 +22,7 @@ This document is the source of truth for current implementation maturity. ClawCa
 | JSON schemas | **Scaffold** | Initial schema files define device, event, observation, and health contracts. |
 | Gateway service | **Scaffold** | Python package layout, API, SQLite persistence, schema validation, sample import CLI, first MCP-style tool functions, HTTP tool dispatch, dashboard JSON, and a minimal local HTML dashboard exist. Runtime is still local-development grade. |
 | Node simulator | **Working** | Deterministic simulator can generate schema-compatible device, event, and health payloads without hardware. |
-| Firmware | **Scaffold** | ESP-IDF component layout exists. Hardware code is not yet ported. |
+| Firmware | **Scaffold** | ESP-IDF component layout exists, WildCAM migration interfaces are defined, ESP32-S3-EYE is selected as the first unverified camera target, and the camera component now has a gated `esp32-camera` hardware path. Physical hardware validation is still required. |
 | Brain adapter | **Scaffold** | Oh-Ben-Claw/MCP tool definitions are being staged; Python tool functions, HTTP tool dispatch, and a lightweight MCP-compatible stdio bridge exist for recent detections, node health, and daily summary. |
 | AI model integration | **Planned** | SpeciesNet, MegaDetector-style detection, ESP-DL, and LiteRT integrations are planned but not implemented here yet. |
 | Cloud backend | **Planned** | Cloud is intentionally deferred until the local field system works. |

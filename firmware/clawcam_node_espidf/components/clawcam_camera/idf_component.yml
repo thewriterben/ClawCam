@@ -1,0 +1,5 @@
+dependencies:
+  espressif/esp32-camera:
+    version: ">=2.0.0"
+    rules:
+      - if: "CONFIG_CLAWCAM_CAMERA_USE_ESP_CAMERA == y"

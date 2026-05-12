@@ -43,6 +43,33 @@ def test_reference_board_profile_remains_explicitly_not_supported() -> None:
     assert any("not a supported hardware profile" in note for note in profile["notes"])
 
 
+def test_esp32_s3_eye_profile_defines_concrete_camera_pins_but_remains_unverified() -> None:
+    profile_path = ROOT / "firmware/clawcam_node_espidf/boards/esp32_s3_eye_v22.json"
+    profile = json.loads(profile_path.read_text(encoding="utf-8"))
+    assert profile["board_id"] == "esp32-s3-eye-v2.2"
+    assert profile["status"] == "initial_target_pinmap_unverified"
+    pins = profile["camera"]["pins"]
+    assert pins["xclk"] == 15
+    assert pins["d0"] == 11
+    assert pins["d7"] == 16
+    assert pins["vsync"] == 6
+    assert pins["href"] == 7
+    assert pins["pclk"] == 13
+    assert profile["storage"]["pins"]["d0"] == 40
+    assert any("captures a valid JPEG" in requirement for requirement in profile["promotion_requirements"])
+
+
+def test_camera_component_exposes_esp32_camera_integration_gate() -> None:
+    camera_source = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_camera/clawcam_camera.c").read_text(encoding="utf-8")
+    camera_header = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_camera/include/clawcam_camera.h").read_text(encoding="utf-8")
+    kconfig = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_camera/Kconfig").read_text(encoding="utf-8")
+    assert "CONFIG_CLAWCAM_CAMERA_USE_ESP_CAMERA" in camera_source
+    assert "esp_camera_init" in camera_source
+    assert "esp_camera_fb_get" in camera_source
+    assert "clawcam_camera_default_esp32_s3_eye_config" in camera_header
+    assert "CLAWCAM_CAMERA_USE_ESP_CAMERA" in kconfig
+
+
 def test_oh_ben_claw_example_config_documents_stdio_bridge() -> None:
     config = (ROOT / "brain/oh-ben-claw-adapter/examples/clawcam-mcp-stdio.toml").read_text(encoding="utf-8")
     assert "[mcp_servers.clawcam_gateway]" in config

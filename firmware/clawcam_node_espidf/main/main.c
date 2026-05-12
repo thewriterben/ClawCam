@@ -33,12 +33,8 @@ static void init_components(void)
         .min_free_bytes = 128 * 1024 * 1024,
         .auto_cleanup_enabled = false,
     };
-    const clawcam_camera_config_t camera_config = {
-        .jpeg_quality = 12,
-        .frame_size = 0,
-        .flash_gpio = -1,
-        .flash_enabled = false,
-    };
+    clawcam_camera_config_t camera_config;
+    ESP_ERROR_CHECK(clawcam_camera_default_esp32_s3_eye_config(&camera_config));
     const clawcam_motion_config_t motion_config = {
         .pir_gpio = 13,
         .debounce_ms = 2000,

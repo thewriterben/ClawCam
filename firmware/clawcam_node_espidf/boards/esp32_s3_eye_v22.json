@@ -1,0 +1,76 @@
+{
+  "board_id": "esp32-s3-eye-v2.2",
+  "status": "initial_target_pinmap_unverified",
+  "description": "Initial ClawCam ESP32-S3 camera target profile based on Espressif ESP32-S3-EYE v2.2 BSP camera and SD-card pin definitions. This profile is hardware-specific but not yet field-supported until a build, flash, capture, SD write, and sleep/wake test pass on physical hardware.",
+  "mcu": "esp32-s3",
+  "source_references": [
+    {
+      "title": "Espressif ESP32-S3-EYE Getting Started Guide",
+      "url": "https://github.com/espressif/esp-who/blob/master/docs/en/get-started/ESP32-S3-EYE_Getting_Started_Guide.md",
+      "notes": "Documents ESP32-S3-EYE v2.2 hardware, OV2640 camera, 8 MB Octal PSRAM, 8 MB flash, MicroSD slot, and battery pads."
+    },
+    {
+      "title": "Espressif ESP-BSP esp32_s3_eye.h",
+      "url": "https://raw.githubusercontent.com/espressif/esp-bsp/master/bsp/esp32_s3_eye/include/bsp/esp32_s3_eye.h",
+      "notes": "Defines BSP_CAMERA_GPIO_XCLK, BSP_CAMERA_D0-D7, BSP_CAMERA_PCLK, BSP_CAMERA_VSYNC, BSP_CAMERA_HSYNC, BSP_I2C_SDA, BSP_I2C_SCL, and SD-card pins."
+    }
+  ],
+  "camera": {
+    "sensor": "ov2640",
+    "interface": "dvp",
+    "pixel_format": "jpeg",
+    "xclk_hz": 16000000,
+    "default_frame_size": "UXGA",
+    "default_jpeg_quality": 12,
+    "vflip": true,
+    "hflip": false,
+    "pins": {
+      "pwdn": -1,
+      "reset": -1,
+      "xclk": 15,
+      "siod": 4,
+      "sioc": 5,
+      "d0": 11,
+      "d1": 9,
+      "d2": 8,
+      "d3": 10,
+      "d4": 12,
+      "d5": 18,
+      "d6": 17,
+      "d7": 16,
+      "vsync": 6,
+      "href": 7,
+      "pclk": 13
+    }
+  },
+  "storage": {
+    "type": "sdmmc_1bit",
+    "mount_point": "/sdcard",
+    "pins": {
+      "d0": 40,
+      "cmd": 38,
+      "clk": 39,
+      "d1": -1,
+      "d2": -1,
+      "d3": -1,
+      "detect": -1
+    }
+  },
+  "motion": {
+    "pir_gpio": -1,
+    "debounce_ms": 2000,
+    "notes": "ESP32-S3-EYE does not include a built-in PIR sensor. Set this to an externally wired GPIO before enabling motion wake."
+  },
+  "power": {
+    "battery_adc_channel": -1,
+    "low_battery_threshold_v": 3.55,
+    "notes": "Battery pads exist on ESP32-S3-EYE, but battery voltage measurement path must be verified before enabling ADC-based battery estimates."
+  },
+  "promotion_requirements": [
+    "ESP-IDF firmware builds with the esp32-camera component enabled.",
+    "Camera initializes and captures a valid JPEG frame on physical ESP32-S3-EYE v2.2 hardware.",
+    "Captured JPEG can be saved to the onboard MicroSD slot.",
+    "Gateway can ingest metadata generated from the hardware capture path.",
+    "Power and wake behavior are tested before enabling unattended field deployments."
+  ]
+}
