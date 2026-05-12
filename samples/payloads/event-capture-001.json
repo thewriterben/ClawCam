@@ -1,0 +1,63 @@
+{
+  "event_id": "evt-capture-001",
+  "event_type": "capture",
+  "device_id": "node-001",
+  "deployment_id": "deploy-north-ridge-2026",
+  "timestamp": "2026-05-12T12:04:12Z",
+  "time_source": "rtc",
+  "source": "node",
+  "media": [
+    {
+      "media_id": "img-node-001-20260512-120412",
+      "media_type": "image",
+      "path": "samples/media/img-node-001-20260512-120412.jpg",
+      "uri": null,
+      "mime_type": "image/jpeg",
+      "size_bytes": 1024,
+      "sha256": null
+    }
+  ],
+  "battery": {
+    "voltage": 3.91,
+    "percentage": 72,
+    "charging": false
+  },
+  "environment": {
+    "temperature_c": 11.8,
+    "humidity_percent": 54.2,
+    "pressure_hpa": 842.3,
+    "lux": 38.0
+  },
+  "location": {
+    "latitude": 45.5123,
+    "longitude": -110.9012,
+    "altitude_m": 1492.0,
+    "sensitive": true
+  },
+  "classifications": [
+    {
+      "classification_id": "cls-node-001-001",
+      "label": "animal",
+      "scientific_name": null,
+      "taxon_id": null,
+      "confidence": 0.82,
+      "source": "node",
+      "model": {
+        "name": "clawcam-sim-filter",
+        "version": "0.1.0",
+        "runtime": "simulator",
+        "threshold": 0.6
+      },
+      "review_state": "unreviewed",
+      "reviewer": null,
+      "reviewed_at": null,
+      "notes": "Simulated lightweight node-side animal filter."
+    }
+  ],
+  "metadata": {
+    "trigger": "pir",
+    "motion_score": 0.74,
+    "capture_profile": "balanced",
+    "simulated": true
+  }
+}

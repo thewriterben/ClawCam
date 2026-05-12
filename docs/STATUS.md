@@ -20,9 +20,10 @@ This document is the source of truth for current implementation maturity. ClawCa
 | Legacy archives | **Legacy Reference** | Original archives are retained under `legacy_archives/` and are not the active source of truth. |
 | Documentation | **Scaffold** | Core docs are being created as implementation guides. |
 | JSON schemas | **Scaffold** | Initial schema files define device, event, observation, and health contracts. |
-| Gateway service | **Scaffold** | Python package layout and intended module boundaries exist. Runtime implementation is next. |
+| Gateway service | **Scaffold** | Python package layout, API, SQLite persistence, schema validation, sample import CLI, first MCP-style tool functions, HTTP tool dispatch, dashboard JSON, and a minimal local HTML dashboard exist. Runtime is still local-development grade. |
+| Node simulator | **Working** | Deterministic simulator can generate schema-compatible device, event, and health payloads without hardware. |
 | Firmware | **Scaffold** | ESP-IDF component layout exists. Hardware code is not yet ported. |
-| Brain adapter | **Scaffold** | Oh-Ben-Claw/MCP tool definitions are being staged. |
+| Brain adapter | **Scaffold** | Oh-Ben-Claw/MCP tool definitions are being staged; first Python tool functions exist for recent detections, node health, and daily summary. |
 | AI model integration | **Planned** | SpeciesNet, MegaDetector-style detection, ESP-DL, and LiteRT integrations are planned but not implemented here yet. |
 | Cloud backend | **Planned** | Cloud is intentionally deferred until the local field system works. |
 
@@ -32,4 +33,4 @@ ClawCam will not describe features as production-ready until they have implement
 
 ## First Milestone Definition
 
-The first milestone is a working vertical slice. It is complete only when a ClawCam node or simulator can submit an event to the gateway, the gateway validates the event against schema, persists it, exposes it through an API/tool interface, and a brain adapter can query recent detections.
+The first milestone is substantially implemented for a simulator-based development loop: a simulator can generate payloads, sample payloads exist, the gateway can validate and persist events, Python and HTTP tool functions can query recent detections and node health, and a minimal local dashboard can render the gateway state. It is complete only when the same flow includes a real hardware node path and documented release-grade setup instructions.

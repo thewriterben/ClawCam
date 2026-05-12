@@ -72,7 +72,20 @@
     },
     "classifications": {
       "type": "array",
-      "items": {"$ref": "clawcam-observation.schema.json#/$defs/classification"},
+      "items": {
+        "type": "object",
+        "required": ["classification_id", "label", "source", "review_state"],
+        "additionalProperties": true,
+        "properties": {
+          "classification_id": {"type": "string"},
+          "label": {"type": "string"},
+          "scientific_name": {"type": ["string", "null"]},
+          "taxon_id": {"type": ["string", "null"]},
+          "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+          "source": {"type": "string", "enum": ["model", "human", "node", "gateway", "import"]},
+          "review_state": {"type": "string", "enum": ["unreviewed", "verified", "corrected", "rejected", "needs_review"]}
+        }
+      },
       "default": []
     },
     "metadata": {
