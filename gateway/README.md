@@ -66,6 +66,15 @@ curl -X POST http://localhost:8080/api/v1/tools/get_recent_detections \
   -d '{"arguments":{"limit":10}}'
 ```
 
+Run the MCP-compatible stdio server for agent clients:
+
+```bash
+cd gateway
+PYTHONPATH=. python -m clawcam_gateway.mcp_server.stdio_server --db ../clawcam_gateway.db
+```
+
+The stdio server currently supports `initialize`, `tools/list`, `tools/call`, and `ping`. It is the first bridge toward Oh-Ben-Claw and other agent clients.
+
 ## Initial API
 
 | Method | Path | Purpose |

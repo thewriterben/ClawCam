@@ -1,0 +1,70 @@
+# ClawCam ↔ Oh-Ben-Claw MCP-Compatible Stdio Example
+#
+# Purpose:
+#   This example documents how an Oh-Ben-Claw deployment should connect to the
+#   ClawCam gateway tool surface. It mirrors Oh-Ben-Claw's McpServerConfig shape:
+#   transport, command, args, url, token, and env.
+#
+# Status:
+#   This file is an integration example for ClawCam. If the target Oh-Ben-Claw
+#   config loader does not yet expose a top-level external MCP server list, use
+#   these values when wiring McpRegistry::connect(...) or the equivalent local
+#   configuration adapter.
+
+[agent]
+name = "ClawCam-Brain"
+system_prompt = """
+You are ClawCam-Brain, an operations agent for an offline-first wildlife monitoring
+system. Use ClawCam tools to inspect recent detections, node health, and daily
+activity summaries. Treat capture requests, configuration changes, deletion,
+publication, cloud sync, and firmware updates as approval-gated operations.
+"""
+max_tool_iterations = 12
+
+[autonomy]
+level = "supervised"
+auto_approve = [
+  "get_recent_detections",
+  "get_node_health",
+  "generate_daily_summary",
+]
+always_ask = [
+  "capture_now",
+  "apply_config_patch",
+  "delete_media",
+  "export_public_dataset",
+  "ota_update_node",
+]
+
+# External MCP-compatible tool source for ClawCam.
+# This block follows Oh-Ben-Claw's McpServerConfig fields.
+[mcp_servers.clawcam_gateway]
+transport = "stdio"
+command = "python3.11"
+args = [
+  "-m",
+  "clawcam_gateway.mcp_server.stdio_server",
+  "--db",
+  "../clawcam_gateway.db",
+]
+url = ""
+token = ""
+
+[mcp_servers.clawcam_gateway.env]
+PYTHONPATH = "./gateway"
+
+[clawcam]
+gateway_database = "../clawcam_gateway.db"
+dashboard_url = "http://localhost:8080/dashboard"
+http_tools_url = "http://localhost:8080/api/v1/tools"
+
+[clawcam.tool_policy]
+read_only = [
+  "get_recent_detections",
+  "get_node_health",
+  "generate_daily_summary",
+]
+approval_required = [
+  "capture_now",
+  "apply_config_patch",
+]

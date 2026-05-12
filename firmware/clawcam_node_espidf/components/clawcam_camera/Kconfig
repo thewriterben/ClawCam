@@ -1,0 +1,11 @@
+menu "ClawCam Camera"
+
+config CLAWCAM_CAMERA_USE_ESP_CAMERA
+    bool "Enable esp32-camera hardware capture path"
+    default n
+    help
+        Enable this only when the espressif/esp32-camera component is available
+        in the ESP-IDF project. When disabled, the ClawCam camera component
+        initializes in scaffold mode and capture returns ESP_ERR_NOT_SUPPORTED.
+
+endmenu
