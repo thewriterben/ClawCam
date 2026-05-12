@@ -22,6 +22,16 @@ The gateway remains the system of record for field data. The brain calls gateway
 
 The first-pass gateway tool functions now live in `gateway/clawcam_gateway/tools/clawcam_tools.py`. They provide direct Python callables for `get_recent_detections`, `get_node_health`, `generate_daily_summary`, and structured not-yet-implemented responses for approval-gated operations such as `capture_now` and `apply_config_patch`.
 
+## MCP-Compatible Bridge
+
+The first MCP-compatible stdio bridge now lives in `gateway/clawcam_gateway/mcp_server/stdio_server.py`. It supports `initialize`, `tools/list`, `tools/call`, and `ping`, and it wraps the same gateway tool functions used by the Python dispatcher and HTTP tool endpoint.
+
+Run it from the gateway directory:
+
+```bash
+PYTHONPATH=. python -m clawcam_gateway.mcp_server.stdio_server --db ../clawcam_gateway.db
+```
+
 ## Next Implementation Step
 
-Create a small MCP server in `gateway/clawcam_gateway/mcp_server/` that wraps these gateway tool functions. Then add Oh-Ben-Claw examples showing how to connect to that MCP server or call the gateway HTTP endpoints directly.
+Add an Oh-Ben-Claw example configuration that launches this stdio bridge and maps its read-only tools into the brain. After that, replace or complement the lightweight bridge with a full SDK-backed MCP server once the final client runtime is selected.
