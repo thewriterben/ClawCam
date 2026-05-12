@@ -2,15 +2,17 @@
  * ClawCam Node firmware scaffold.
  *
  * This file wires the deterministic component boundaries that will receive the
- * WildCAM camera-trap behavior port. The first hardware-ready path is a gated
- * ESP32-S3-EYE camera smoke test that initializes the camera, captures one JPEG,
- * logs frame details, and releases the framebuffer safely.
+ * WildCAM camera-trap behavior port. The current hardware-ready path is a gated
+ * ESP32-S3-EYE camera smoke test that can capture one JPEG, optionally persist
+ * it to SD/FATFS storage, write metadata, and release the framebuffer safely.
  */
 
+#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include "clawcam_camera.h"
 #include "clawcam_motion.h"
@@ -25,6 +27,10 @@
 #define CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_RETRY_COUNT 1
 #endif
 
+#ifndef CONFIG_CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE
+#define CONFIG_CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE 0
+#endif
+
 static const char *TAG = "clawcam_node";
 
 static void init_components(void)
@@ -36,13 +42,8 @@ static void init_components(void)
         .low_battery_threshold_v = 3.55f,
         .energy_tracking_enabled = true,
     };
-    const clawcam_storage_config_t storage_config = {
-        .mount_point = "/sdcard",
-        .media_dir = "media",
-        .metadata_dir = "metadata",
-        .min_free_bytes = 128 * 1024 * 1024,
-        .auto_cleanup_enabled = false,
-    };
+    clawcam_storage_config_t storage_config;
+    ESP_ERROR_CHECK(clawcam_storage_default_esp32_s3_eye_config(&storage_config));
     clawcam_camera_config_t camera_config;
     ESP_ERROR_CHECK(clawcam_camera_default_esp32_s3_eye_config(&camera_config));
     const clawcam_motion_config_t motion_config = {
@@ -52,9 +53,59 @@ static void init_components(void)
     };
 
     ESP_ERROR_CHECK(clawcam_power_init(&power_config));
-    ESP_ERROR_CHECK(clawcam_storage_init(&storage_config));
+    esp_err_t storage_err = clawcam_storage_init(&storage_config);
+    if (storage_err != ESP_OK) {
+        ESP_LOGW(TAG, "storage initialization did not complete: %s; capture can still run without persistence", esp_err_to_name(storage_err));
+    }
     ESP_ERROR_CHECK(clawcam_camera_init(&camera_config));
     ESP_ERROR_CHECK(clawcam_motion_init(&motion_config));
+}
+
+static void persist_smoke_test_capture(const clawcam_camera_capture_t *capture)
+{
+#if CONFIG_CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE
+    if (capture == NULL || capture->data == NULL || capture->length == 0) {
+        ESP_LOGW(TAG, "smoke-test capture has no media bytes to persist");
+        return;
+    }
+
+    char media_id[64];
+    snprintf(media_id, sizeof(media_id), "smoke-%lld", (long long)esp_timer_get_time());
+
+    const clawcam_storage_media_t media = {
+        .data = capture->data,
+        .length = capture->length,
+        .media_id = media_id,
+        .extension = "jpg",
+    };
+    char media_path[192];
+    esp_err_t err = clawcam_storage_save_media(&media, media_path, sizeof(media_path));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "smoke-test media was not persisted: %s", esp_err_to_name(err));
+        return;
+    }
+
+    char metadata[384];
+    snprintf(metadata,
+             sizeof(metadata),
+             "{\"schema_version\":\"clawcam.event.v1\",\"event_type\":\"camera_smoke_test\",\"media_id\":\"%s\",\"media_path\":\"%s\",\"bytes\":%u,\"width\":%lu,\"height\":%lu,\"mime_type\":\"%s\",\"source\":\"esp32-s3-eye-v2.2\"}\n",
+             media_id,
+             media_path,
+             (unsigned)capture->length,
+             (unsigned long)capture->width,
+             (unsigned long)capture->height,
+             capture->mime_type ? capture->mime_type : "image/jpeg");
+
+    err = clawcam_storage_save_metadata(media_path, metadata);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "smoke-test metadata was not persisted: %s", esp_err_to_name(err));
+        return;
+    }
+    ESP_LOGI(TAG, "smoke-test capture persisted: %s", media_path);
+#else
+    (void)capture;
+    ESP_LOGI(TAG, "smoke-test storage persistence disabled; enable CONFIG_CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE for bench validation");
+#endif
 }
 
 static void run_camera_smoke_test(void)
@@ -72,6 +123,7 @@ static void run_camera_smoke_test(void)
                      (unsigned long)capture.width,
                      (unsigned long)capture.height,
                      capture.mime_type ? capture.mime_type : "unknown");
+            persist_smoke_test_capture(&capture);
             clawcam_camera_release(&capture);
             return;
         }
@@ -103,9 +155,11 @@ void app_main(void)
                      power_state.low_battery ? "true" : "false");
         }
         if (clawcam_storage_get_health(&storage_health) == ESP_OK) {
-            ESP_LOGI(TAG, "storage scaffold: mounted=%s free=%llu",
+            ESP_LOGI(TAG, "storage: mounted=%s total=%llu free=%llu media_count=%lu",
                      storage_health.mounted ? "true" : "false",
-                     (unsigned long long)storage_health.free_bytes);
+                     (unsigned long long)storage_health.total_bytes,
+                     (unsigned long long)storage_health.free_bytes,
+                     (unsigned long)storage_health.media_count);
         }
         if (clawcam_motion_get_event(&motion_event) == ESP_OK) {
             ESP_LOGI(TAG, "motion scaffold: detected=%s source=%s",
@@ -113,7 +167,7 @@ void app_main(void)
                      motion_event.trigger_source);
         }
 
-        ESP_LOGI(TAG, "Next firmware port: SD/FATFS writes, PIR interrupt, battery ADC, deep sleep");
+        ESP_LOGI(TAG, "Next firmware port: PIR interrupt, battery ADC, deep sleep, gateway event queue");
         vTaskDelay(pdMS_TO_TICKS(30000));
     }
 }
