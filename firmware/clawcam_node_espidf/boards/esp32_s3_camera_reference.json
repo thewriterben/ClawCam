@@ -1,0 +1,44 @@
+{
+  "board_id": "esp32-s3-camera-reference",
+  "status": "planned_pinmap",
+  "description": "Reference ESP32-S3 camera board profile for the first ClawCam hardware port. Replace placeholder pins with the selected production board pinout before claiming support.",
+  "mcu": "esp32-s3",
+  "camera": {
+    "sensor": "ov2640_or_board_default",
+    "xclk_hz": 20000000,
+    "pins": {
+      "pwdn": null,
+      "reset": null,
+      "xclk": null,
+      "siod": null,
+      "sioc": null,
+      "d0": null,
+      "d1": null,
+      "d2": null,
+      "d3": null,
+      "d4": null,
+      "d5": null,
+      "d6": null,
+      "d7": null,
+      "vsync": null,
+      "href": null,
+      "pclk": null
+    }
+  },
+  "motion": {
+    "pir_gpio": 13,
+    "debounce_ms": 2000
+  },
+  "storage": {
+    "type": "sdmmc_or_spi_sd",
+    "mount_point": "/sdcard"
+  },
+  "power": {
+    "battery_adc_channel": 0,
+    "low_battery_threshold_v": 3.55
+  },
+  "notes": [
+    "This is not a supported hardware profile yet.",
+    "Promotion to supported requires pin-map completion, successful ESP-IDF build, capture test, SD write test, battery reading test, and sleep/wake test."
+  ]
+}

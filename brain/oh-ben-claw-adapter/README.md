@@ -32,6 +32,10 @@ Run it from the gateway directory:
 PYTHONPATH=. python -m clawcam_gateway.mcp_server.stdio_server --db ../clawcam_gateway.db
 ```
 
+## Example Configuration
+
+A ClawCam-specific Oh-Ben-Claw example configuration is available at `examples/clawcam-mcp-stdio.toml`. The broader integration guide lives at `docs/integration/oh-ben-claw-mcp.md`.
+
 ## Next Implementation Step
 
-Add an Oh-Ben-Claw example configuration that launches this stdio bridge and maps its read-only tools into the brain. After that, replace or complement the lightweight bridge with a full SDK-backed MCP server once the final client runtime is selected.
+Add an Oh-Ben-Claw-side loader or adapter that launches this stdio bridge, calls `tools/list`, and maps its read-only tools into the brain registry automatically. After that, replace or complement the lightweight bridge with a full SDK-backed MCP server once the final client runtime is selected.
