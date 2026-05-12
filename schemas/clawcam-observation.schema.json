@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clawcam.dev/schemas/clawcam-observation.schema.json",
+  "title": "ClawCam Observation",
+  "type": "object",
+  "required": ["observation_id", "event_id", "device_id", "timestamp"],
+  "additionalProperties": false,
+  "$defs": {
+    "classification": {
+      "type": "object",
+      "required": ["classification_id", "label", "source", "review_state"],
+      "additionalProperties": false,
+      "properties": {
+        "classification_id": {"type": "string"},
+        "label": {"type": "string"},
+        "scientific_name": {"type": ["string", "null"]},
+        "taxon_id": {"type": ["string", "null"]},
+        "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "source": {"type": "string", "enum": ["model", "human", "node", "gateway", "import"]},
+        "model": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {"type": "string"},
+            "version": {"type": "string"},
+            "runtime": {"type": "string"},
+            "threshold": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
+        "review_state": {
+          "type": "string",
+          "enum": ["unreviewed", "verified", "corrected", "rejected", "needs_review"]
+        },
+        "reviewer": {"type": ["string", "null"]},
+        "reviewed_at": {"type": ["string", "null"], "format": "date-time"},
+        "notes": {"type": ["string", "null"]}
+      }
+    }
+  },
+  "properties": {
+    "observation_id": {"type": "string"},
+    "event_id": {"type": "string"},
+    "device_id": {"type": "string"},
+    "deployment_id": {"type": ["string", "null"]},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "media_ids": {
+      "type": "array",
+      "items": {"type": "string"},
+      "default": []
+    },
+    "classifications": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/classification"},
+      "default": []
+    },
+    "count": {"type": ["integer", "null"], "minimum": 0},
+    "behavior": {"type": ["string", "null"]},
+    "metadata": {"type": "object", "additionalProperties": true, "default": {}}
+  }
+}

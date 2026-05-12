@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clawcam.dev/schemas/clawcam-event.schema.json",
+  "title": "ClawCam Event",
+  "type": "object",
+  "required": ["event_id", "event_type", "device_id", "timestamp", "source"],
+  "additionalProperties": false,
+  "properties": {
+    "event_id": {"type": "string", "minLength": 1},
+    "event_type": {
+      "type": "string",
+      "enum": ["motion", "capture", "manual_capture", "scheduled_capture", "health", "telemetry", "low_battery", "storage_warning", "error", "wildlife_detection"]
+    },
+    "device_id": {"type": "string", "minLength": 1},
+    "deployment_id": {"type": ["string", "null"]},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "time_source": {
+      "type": "string",
+      "enum": ["rtc", "ntp", "gps", "gateway", "millis", "unknown"],
+      "default": "unknown"
+    },
+    "source": {
+      "type": "string",
+      "enum": ["node", "gateway", "brain", "cloud", "import"]
+    },
+    "media": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["media_id", "media_type"],
+        "additionalProperties": false,
+        "properties": {
+          "media_id": {"type": "string"},
+          "media_type": {"type": "string", "enum": ["image", "video", "audio", "thumbnail", "derived"]},
+          "path": {"type": ["string", "null"]},
+          "uri": {"type": ["string", "null"], "format": "uri"},
+          "mime_type": {"type": ["string", "null"]},
+          "size_bytes": {"type": ["integer", "null"], "minimum": 0},
+          "sha256": {"type": ["string", "null"]}
+        }
+      },
+      "default": []
+    },
+    "battery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "voltage": {"type": "number"},
+        "percentage": {"type": "integer", "minimum": 0, "maximum": 100},
+        "charging": {"type": "boolean"}
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "temperature_c": {"type": "number"},
+        "humidity_percent": {"type": "number", "minimum": 0, "maximum": 100},
+        "pressure_hpa": {"type": "number"},
+        "lux": {"type": "number", "minimum": 0}
+      }
+    },
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "latitude": {"type": "number", "minimum": -90, "maximum": 90},
+        "longitude": {"type": "number", "minimum": -180, "maximum": 180},
+        "altitude_m": {"type": "number"},
+        "sensitive": {"type": "boolean", "default": true}
+      }
+    },
+    "classifications": {
+      "type": "array",
+      "items": {"$ref": "clawcam-observation.schema.json#/$defs/classification"},
+      "default": []
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    }
+  }
+}
