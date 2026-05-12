@@ -1,0 +1,39 @@
+{
+  "event_id": "evt-smoke-123",
+  "event_type": "capture",
+  "device_id": "esp32-s3-eye-v2.2-bench-node",
+  "deployment_id": "hardware-bench",
+  "timestamp": "1970-01-01T00:00:00Z",
+  "time_source": "unknown",
+  "source": "node",
+  "media": [
+    {
+      "media_id": "smoke-123",
+      "media_type": "image",
+      "path": "media/smoke-123.jpg",
+      "uri": null,
+      "mime_type": "image/jpeg",
+      "size_bytes": 41,
+      "sha256": null
+    }
+  ],
+  "classifications": [
+    {
+      "classification_id": "cls-evt-smoke-123-smoke",
+      "label": "unclassified",
+      "scientific_name": null,
+      "taxon_id": null,
+      "confidence": null,
+      "source": "node",
+      "review_state": "unreviewed"
+    }
+  ],
+  "metadata": {
+    "trigger": "camera_smoke_test",
+    "capture_profile": "smoke_test",
+    "board_profile": "esp32-s3-eye-v2.2",
+    "width": 1600,
+    "height": 1200,
+    "firmware_generated": true
+  }
+}

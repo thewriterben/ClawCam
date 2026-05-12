@@ -7,6 +7,7 @@ from pathlib import Path
 import json
 from typing import Any
 
+from clawcam_gateway.ingest.firmware_bundle import import_firmware_bundle
 from clawcam_gateway.ingest.validation import validate_device, validate_event, validate_health
 from clawcam_gateway.storage.database import GatewayDatabase
 
@@ -59,12 +60,19 @@ def _looks_like_health(payload: dict[str, Any]) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Import ClawCam sample payloads into a gateway database.")
+    parser = argparse.ArgumentParser(description="Import ClawCam payloads into a gateway database.")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     import_sample = subcommands.add_parser("import-sample", help="Import a file or directory of JSON payloads.")
     import_sample.add_argument("path", help="Payload JSON file or directory containing payload JSON files.")
     import_sample.add_argument("--db", default="clawcam_gateway.db", help="SQLite gateway database path.")
+
+    import_firmware = subcommands.add_parser("import-firmware-bundle", help="Import firmware SD-card bundle artifacts from events/, media/, and metadata/.")
+    import_firmware.add_argument("path", help="Firmware SD-card bundle root containing events/, media/, and optionally metadata/.")
+    import_firmware.add_argument("--db", default="clawcam_gateway.db", help="SQLite gateway database path.")
+    import_firmware.add_argument("--media-dir", default="gateway_media", help="Destination directory for copied media when copying is enabled.")
+    import_firmware.add_argument("--reference-media", action="store_true", help="Reference media in place instead of copying files into --media-dir.")
+    import_firmware.add_argument("--no-auto-register-devices", action="store_true", help="Fail instead of auto-registering unknown firmware node devices.")
 
     args = parser.parse_args()
     db = GatewayDatabase(args.db)
@@ -77,6 +85,23 @@ def main() -> None:
             imported = [import_payload(path, db)]
         for item in imported:
             print(f"imported {item}")
+    elif args.command == "import-firmware-bundle":
+        result = import_firmware_bundle(
+            path,
+            db,
+            media_dir=Path(args.media_dir),
+            copy_media=not args.reference_media,
+            auto_register_devices=not args.no_auto_register_devices,
+        )
+        for device_id in result.registered_devices:
+            print(f"registered device:{device_id}")
+        for event_id in result.imported_events:
+            print(f"imported event:{event_id}")
+        for media_path in result.copied_media:
+            print(f"copied media:{media_path}")
+        for media_path in result.referenced_media:
+            print(f"referenced media:{media_path}")
+        print(f"summary events={result.event_count} media={result.media_count} devices={len(result.registered_devices)}")
 
 
 if __name__ == "__main__":
