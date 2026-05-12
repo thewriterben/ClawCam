@@ -1,0 +1,34 @@
+menu "ClawCam Storage"
+
+config CLAWCAM_STORAGE_USE_FATFS_SDMMC
+    bool "Enable SDMMC/FATFS storage path"
+    default n
+    help
+        Enable the ESP-IDF SDMMC/FATFS-backed storage path. When disabled,
+        the ClawCam storage component remains scaffold-safe and media/metadata
+        writes return ESP_ERR_NOT_SUPPORTED.
+
+config CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE
+    bool "Persist camera smoke-test capture to storage"
+    default n
+    depends on CLAWCAM_STORAGE_USE_FATFS_SDMMC
+    help
+        Save the boot-time camera smoke-test JPEG and metadata to storage when
+        a capture succeeds. This is intended for bench validation and requires
+        a mounted SD card.
+
+config CLAWCAM_STORAGE_MAX_FILES
+    int "Maximum open files for FATFS mount"
+    default 5
+    range 1 16
+    depends on CLAWCAM_STORAGE_USE_FATFS_SDMMC
+
+config CLAWCAM_STORAGE_FORMAT_IF_MOUNT_FAILED
+    bool "Format SD card if mount fails"
+    default n
+    depends on CLAWCAM_STORAGE_USE_FATFS_SDMMC
+    help
+        Leave disabled for field safety. Enable only during controlled bench
+        testing when card contents may be erased.
+
+endmenu

@@ -9,12 +9,31 @@
 extern "C" {
 #endif
 
+#define CLAWCAM_STORAGE_GPIO_NC (-1)
+
+typedef enum {
+    CLAWCAM_STORAGE_BUS_SDMMC_1BIT = 0,
+    CLAWCAM_STORAGE_BUS_SPI = 1,
+} clawcam_storage_bus_t;
+
+typedef struct {
+    int d0;
+    int d1;
+    int d2;
+    int d3;
+    int cmd;
+    int clk;
+    int detect;
+} clawcam_storage_pins_t;
+
 typedef struct {
     const char *mount_point;
     const char *media_dir;
     const char *metadata_dir;
     uint64_t min_free_bytes;
     bool auto_cleanup_enabled;
+    clawcam_storage_bus_t bus;
+    clawcam_storage_pins_t pins;
 } clawcam_storage_config_t;
 
 typedef struct {
@@ -33,6 +52,7 @@ typedef struct {
     const char *extension;
 } clawcam_storage_media_t;
 
+esp_err_t clawcam_storage_default_esp32_s3_eye_config(clawcam_storage_config_t *config);
 esp_err_t clawcam_storage_init(const clawcam_storage_config_t *config);
 esp_err_t clawcam_storage_save_media(const clawcam_storage_media_t *media, char *out_path, size_t out_path_len);
 esp_err_t clawcam_storage_save_metadata(const char *media_path, const char *json_metadata);

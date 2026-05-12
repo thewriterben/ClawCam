@@ -89,6 +89,31 @@ def test_firmware_main_contains_safe_capture_smoke_test_flow() -> None:
     assert "CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT" in main_source
 
 
+def test_storage_component_exposes_gated_sd_fatfs_persistence() -> None:
+    storage_source = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_storage/clawcam_storage.c").read_text(encoding="utf-8")
+    storage_header = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_storage/include/clawcam_storage.h").read_text(encoding="utf-8")
+    storage_kconfig = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_storage/Kconfig").read_text(encoding="utf-8")
+    storage_cmake = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_storage/CMakeLists.txt").read_text(encoding="utf-8")
+    assert "CONFIG_CLAWCAM_STORAGE_USE_FATFS_SDMMC" in storage_source
+    assert "esp_vfs_fat_sdmmc_mount" in storage_source
+    assert "clawcam_storage_default_esp32_s3_eye_config" in storage_header
+    assert "clawcam_storage_save_media" in storage_header
+    assert "clawcam_storage_save_metadata" in storage_header
+    assert "CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE" in storage_kconfig
+    assert "REQUIRES fatfs sdmmc driver" in storage_cmake
+
+
+def test_firmware_main_persists_smoke_test_capture_when_enabled() -> None:
+    main_source = (ROOT / "firmware/clawcam_node_espidf/main/main.c").read_text(encoding="utf-8")
+    defaults = (ROOT / "firmware/clawcam_node_espidf/sdkconfig.defaults.esp32s3_eye").read_text(encoding="utf-8")
+    assert "persist_smoke_test_capture" in main_source
+    assert "clawcam_storage_save_media" in main_source
+    assert "clawcam_storage_save_metadata" in main_source
+    assert "camera_smoke_test" in main_source
+    assert "CONFIG_CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE=y" in defaults
+    assert "CONFIG_CLAWCAM_STORAGE_USE_FATFS_SDMMC=y" in defaults
+
+
 def test_oh_ben_claw_example_config_documents_stdio_bridge() -> None:
     config = (ROOT / "brain/oh-ben-claw-adapter/examples/clawcam-mcp-stdio.toml").read_text(encoding="utf-8")
     assert "[mcp_servers.clawcam_gateway]" in config
