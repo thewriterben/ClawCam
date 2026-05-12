@@ -24,7 +24,7 @@ The first concrete board target is `boards/esp32_s3_eye_v22.json`. It provides a
 
 The hardware path is intentionally gated. When the option is disabled or the driver is unavailable, the camera component remains scaffold-safe and `clawcam_camera_capture()` returns `ESP_ERR_NOT_SUPPORTED` rather than pretending capture is implemented.
 
-Use `BUILD_ESP32_S3_EYE.md` and `sdkconfig.defaults.esp32s3_eye` for the first bench build. That profile enables PSRAM, the gated `esp32-camera` path, the gated SD/FATFS storage path, and `CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT`, which performs one safe capture attempt, logs JPEG frame details, optionally writes the JPEG under `/sdcard/media`, writes paired metadata under `/sdcard/metadata`, writes a gateway-compatible event artifact under `/sdcard/events`, and releases the framebuffer.
+Use `BUILD_ESP32_S3_EYE.md` and `sdkconfig.defaults.esp32s3_eye` for the first bench build. That profile enables PSRAM, the gated `esp32-camera` path, the gated SD/FATFS storage path, and `CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT`, which performs one safe capture attempt, logs JPEG frame details, optionally writes the JPEG under `/sdcard/media`, writes paired metadata under `/sdcard/metadata`, writes a gateway-compatible event artifact under `/sdcard/events`, and releases the framebuffer. The `clawcam_gateway_client` component adds an optional HTTP upload path for `/api/v1/devices` and `/api/v1/events`; SD-card artifacts remain the offline source of truth if upload is disabled or fails.
 
 ## ESP-Claw Integration Direction
 

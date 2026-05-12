@@ -16,6 +16,7 @@
 
 #include "clawcam_camera.h"
 #include "clawcam_events.h"
+#include "clawcam_gateway_client.h"
 #include "clawcam_motion.h"
 #include "clawcam_power.h"
 #include "clawcam_storage.h"
@@ -30,6 +31,10 @@
 
 #ifndef CONFIG_CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE
 #define CONFIG_CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE 0
+#endif
+
+#ifndef CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED
+#define CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED 0
 #endif
 
 static const char *TAG = "clawcam_node";
@@ -134,6 +139,24 @@ static void persist_smoke_test_capture(const clawcam_camera_capture_t *capture)
         ESP_LOGW(TAG, "smoke-test event artifact was not persisted: %s", esp_err_to_name(err));
         return;
     }
+
+#if CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED
+    clawcam_gateway_client_config_t gateway_config;
+    ESP_ERROR_CHECK(clawcam_gateway_client_default_config(&gateway_config));
+    const char *device_json = "{\"device_id\":\"esp32-s3-eye-v2.2-bench-node\",\"device_type\":\"node\",\"name\":\"ESP32-S3-EYE Bench Node\",\"hardware\":{\"board\":\"esp32-s3-eye-v2.2\",\"mcu\":\"esp32-s3\",\"camera\":\"ov2640\",\"storage\":\"sd/fatfs\"},\"firmware\":{\"name\":\"clawcam-node-espidf\",\"version\":\"0.1.0\",\"source\":\"bench-firmware\"},\"deployment_id\":\"hardware-bench\",\"capabilities\":[\"camera\",\"sd_fatfs\",\"event_artifact\",\"gateway_upload\"],\"status\":\"active\",\"created_at\":\"1970-01-01T00:00:00Z\",\"last_seen_at\":\"1970-01-01T00:00:00Z\",\"metadata\":{\"firmware_generated\":true}}";
+    err = clawcam_gateway_client_register_device(&gateway_config, device_json);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "gateway device registration failed; SD event remains source of truth: %s", esp_err_to_name(err));
+    } else {
+        err = clawcam_gateway_client_upload_event(&gateway_config, event_json);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "gateway event upload failed; SD event remains source of truth: %s", esp_err_to_name(err));
+        }
+    }
+#else
+    ESP_LOGI(TAG, "gateway upload disabled; SD event remains offline source of truth");
+#endif
+
     ESP_LOGI(TAG, "smoke-test capture persisted: media=%s event=%s", media_path, event_path);
 #else
     (void)capture;

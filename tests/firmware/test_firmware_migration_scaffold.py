@@ -136,6 +136,27 @@ def test_firmware_event_component_builds_gateway_compatible_event_artifacts() ->
     assert "clawcam_events" in main_cmake
 
 
+def test_gateway_client_component_exposes_optional_http_upload_path() -> None:
+    client_header = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_gateway_client/include/clawcam_gateway_client.h").read_text(encoding="utf-8")
+    client_source = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_gateway_client/clawcam_gateway_client.c").read_text(encoding="utf-8")
+    client_kconfig = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_gateway_client/Kconfig").read_text(encoding="utf-8")
+    client_cmake = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_gateway_client/CMakeLists.txt").read_text(encoding="utf-8")
+    main_source = (ROOT / "firmware/clawcam_node_espidf/main/main.c").read_text(encoding="utf-8")
+    main_cmake = (ROOT / "firmware/clawcam_node_espidf/main/CMakeLists.txt").read_text(encoding="utf-8")
+    assert "clawcam_gateway_client_config_t" in client_header
+    assert "clawcam_gateway_client_register_device" in client_header
+    assert "clawcam_gateway_client_upload_event" in client_header
+    assert "CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED" in client_source
+    assert "esp_http_client_perform" in client_source
+    assert "{\\\"data\\\":%s}" in client_source
+    assert "CLAWCAM_GATEWAY_BASE_URL" in client_kconfig
+    assert "REQUIRES esp_http_client" in client_cmake
+    assert "clawcam_gateway_client_register_device" in main_source
+    assert "clawcam_gateway_client_upload_event" in main_source
+    assert "SD event remains source of truth" in main_source
+    assert "clawcam_gateway_client" in main_cmake
+
+
 def test_oh_ben_claw_example_config_documents_stdio_bridge() -> None:
     config = (ROOT / "brain/oh-ben-claw-adapter/examples/clawcam-mcp-stdio.toml").read_text(encoding="utf-8")
     assert "[mcp_servers.clawcam_gateway]" in config
