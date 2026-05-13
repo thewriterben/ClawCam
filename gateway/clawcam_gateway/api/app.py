@@ -102,8 +102,9 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
                 {"name": "get_recent_detections", "approval_required": False},
                 {"name": "get_node_health", "approval_required": False},
                 {"name": "generate_daily_summary", "approval_required": False},
-                {"name": "capture_now", "approval_required": True, "implemented": False},
-                {"name": "apply_config_patch", "approval_required": True, "implemented": False},
+                {"name": "list_pending_commands", "approval_required": False},
+                {"name": "capture_now", "approval_required": True},
+                {"name": "apply_config_patch", "approval_required": True},
             ]
         }
 

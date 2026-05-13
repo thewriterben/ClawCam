@@ -2,6 +2,8 @@
 
 #include <string.h>
 #include "esp_log.h"
+#include "esp_sleep.h"
+#include "driver/gpio.h"
 
 static const char *TAG = "clawcam_power";
 static bool s_initialized = false;
@@ -66,18 +68,40 @@ esp_err_t clawcam_power_record_transmission(void)
 esp_err_t clawcam_power_configure_wake_on_motion(int pir_gpio)
 {
     s_config.pir_wake_gpio = pir_gpio;
-    ESP_LOGI(TAG, "wake-on-motion scaffold configured for gpio=%d", pir_gpio);
+    /* PIR output goes HIGH on motion; EXT0 triggers when gpio level == 1 */
+    esp_err_t err = esp_sleep_enable_ext0_wakeup((gpio_num_t)pir_gpio, 1);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "EXT0 wakeup on gpio=%d not available (%s); node will rely on timer wake only",
+                 pir_gpio, esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG, "wake-on-motion configured: gpio=%d", pir_gpio);
+    }
     return ESP_OK;
 }
 
 esp_err_t clawcam_power_configure_wake_on_timer(uint64_t seconds)
 {
-    ESP_LOGI(TAG, "wake-on-timer scaffold configured for %llu seconds", (unsigned long long)seconds);
+    if (seconds == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t err = esp_sleep_enable_timer_wakeup(seconds * 1000000ULL);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "timer wakeup configuration failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    ESP_LOGI(TAG, "wake-on-timer configured: %llu seconds", (unsigned long long)seconds);
     return ESP_OK;
 }
 
 esp_err_t clawcam_power_enter_deep_sleep(uint64_t seconds)
 {
-    ESP_LOGW(TAG, "deep sleep scaffold requested for %llu seconds; not entering sleep yet", (unsigned long long)seconds);
-    return ESP_ERR_NOT_SUPPORTED;
+    if (seconds > 0) {
+        /* Caller may have already configured timer wake; this ensures a fallback exists */
+        clawcam_power_configure_wake_on_timer(seconds);
+    }
+    ESP_LOGI(TAG, "entering deep sleep (pir_gpio=%d timer_fallback=%llus)",
+             s_config.pir_wake_gpio, (unsigned long long)seconds);
+    esp_deep_sleep_start();
+    /* never reached */
+    return ESP_OK;
 }

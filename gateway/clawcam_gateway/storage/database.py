@@ -93,6 +93,19 @@ class GatewayDatabase:
                 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
                 CREATE INDEX IF NOT EXISTS idx_events_device_id ON events(device_id);
                 CREATE INDEX IF NOT EXISTS idx_health_device_id ON health_records(device_id);
+
+                CREATE TABLE IF NOT EXISTS pending_commands (
+                    command_id TEXT PRIMARY KEY,
+                    command_type TEXT NOT NULL,
+                    device_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_pending_commands_device ON pending_commands(device_id);
+                CREATE INDEX IF NOT EXISTS idx_pending_commands_status ON pending_commands(status);
                 """
             )
 
@@ -193,6 +206,61 @@ class GatewayDatabase:
                 "SELECT payload_json FROM devices ORDER BY name ASC, device_id ASC"
             ).fetchall()
         return [json.loads(row["payload_json"]) for row in rows]
+
+    def add_pending_command(self, command: dict[str, Any]) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO pending_commands (command_id, command_type, device_id, status, payload_json)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    command["command_id"],
+                    command["command_type"],
+                    command["device_id"],
+                    command.get("status", "queued"),
+                    json.dumps(command, sort_keys=True),
+                ),
+            )
+
+    def get_pending_command(self, command_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM pending_commands WHERE command_id = ?",
+                (command_id,),
+            ).fetchone()
+        return json.loads(row["payload_json"]) if row else None
+
+    def list_pending_commands(self, device_id: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            if device_id and status:
+                rows = conn.execute(
+                    "SELECT payload_json FROM pending_commands WHERE device_id = ? AND status = ? ORDER BY created_at DESC",
+                    (device_id, status),
+                ).fetchall()
+            elif device_id:
+                rows = conn.execute(
+                    "SELECT payload_json FROM pending_commands WHERE device_id = ? ORDER BY created_at DESC",
+                    (device_id,),
+                ).fetchall()
+            elif status:
+                rows = conn.execute(
+                    "SELECT payload_json FROM pending_commands WHERE status = ? ORDER BY created_at DESC",
+                    (status,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT payload_json FROM pending_commands ORDER BY created_at DESC LIMIT 100"
+                ).fetchall()
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def update_command_status(self, command_id: str, status: str) -> bool:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "UPDATE pending_commands SET status = ?, updated_at = datetime('now') WHERE command_id = ?",
+                (status, command_id),
+            )
+        return cursor.rowcount > 0
 
     def latest_health(self, device_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
