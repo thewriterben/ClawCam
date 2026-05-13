@@ -3,13 +3,21 @@
 These functions are intentionally plain Python callables so they can be wrapped by an
 MCP server, an HTTP endpoint, or an Oh-Ben-Claw tool adapter without duplicating
 business logic.
+
+Approval policy:
+  - get_recent_detections, get_node_health, generate_daily_summary, list_pending_commands:
+    read-only, no approval required.
+  - capture_now, apply_config_patch:
+    approval-gated. The brain enforces human approval before calling these.
+    The gateway queues them as pending commands that field nodes can poll.
 """
 
 from __future__ import annotations
 
+import uuid
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -50,12 +58,7 @@ def generate_daily_summary(
     deployment_id: str | None = None,
     limit: int = 100,
 ) -> dict[str, Any]:
-    """Generate a small structured summary from recent gateway events.
-
-    This first-pass implementation summarizes stored events only. A later version should
-    query observations/classifications directly and include reviewed labels, media links,
-    health diagnostics, and model provenance.
-    """
+    """Generate a structured summary from recent gateway events."""
 
     events = context.db.recent_events(limit=max(1, min(int(limit), 500)))
     if report_date:
@@ -83,37 +86,128 @@ def generate_daily_summary(
 
 
 def capture_now(context: ToolContext, device_id: str, reason: str | None = None) -> dict[str, Any]:
-    """Placeholder for approved manual capture requests.
+    """Queue a manual capture command for a ClawCam node.
 
-    Manual capture requires node command transport, which is not implemented in Phase 1.
-    Returning a structured not-ready response lets brain adapters handle the capability
-    safely without pretending the operation exists.
+    The gateway stores this as a pending command. The field node polls
+    /api/v1/commands/{device_id}/pending and executes the capture on its next
+    wake cycle (Phase 2 node command transport). The brain enforces human
+    approval before calling this tool.
     """
 
-    _ = context
-    return {
-        "ok": False,
-        "requires_approval": True,
-        "implemented": False,
+    db = context.db
+    device = db.get_device(device_id)
+    if device is None:
+        return {
+            "ok": False,
+            "error": f"unknown device: {device_id}",
+            "device_id": device_id,
+        }
+
+    command_id = f"cmd-capture-{uuid.uuid4().hex[:12]}"
+    command = {
+        "command_id": command_id,
+        "command_type": "capture_now",
         "device_id": device_id,
-        "reason": reason,
-        "error": "capture_now requires node command transport; planned for Phase 2.",
+        "status": "queued",
+        "reason": reason or "manual capture requested via brain",
+        "queued_at": datetime.now(timezone.utc).isoformat(),
+    }
+    db.add_pending_command(command)
+
+    return {
+        "ok": True,
+        "queued": True,
+        "command_id": command_id,
+        "device_id": device_id,
+        "status": "queued",
+        "message": (
+            "Capture command queued. The node will execute it on its next wake cycle "
+            "when Phase 2 node command polling is active."
+        ),
     }
 
 
-def apply_config_patch(context: ToolContext, device_id: str, patch: dict[str, Any], approval_id: str | None = None) -> dict[str, Any]:
-    """Placeholder for approved configuration changes."""
+def apply_config_patch(
+    context: ToolContext,
+    device_id: str,
+    patch: dict[str, Any],
+    approval_id: str | None = None,
+) -> dict[str, Any]:
+    """Queue an approved configuration patch for a ClawCam node or gateway.
 
-    _ = context
-    return {
-        "ok": False,
-        "requires_approval": True,
-        "implemented": False,
+    The patch is validated and stored as a pending command. The brain enforces
+    human approval before calling this tool; approval_id is recorded for audit.
+    """
+
+    if not isinstance(patch, dict) or not patch:
+        return {
+            "ok": False,
+            "error": "patch must be a non-empty object",
+            "device_id": device_id,
+        }
+
+    db = context.db
+    device = db.get_device(device_id)
+    if device is None:
+        return {
+            "ok": False,
+            "error": f"unknown device: {device_id}",
+            "device_id": device_id,
+        }
+
+    _validate_config_patch(patch)
+
+    command_id = f"cmd-config-{uuid.uuid4().hex[:12]}"
+    command = {
+        "command_id": command_id,
+        "command_type": "apply_config_patch",
         "device_id": device_id,
+        "status": "queued",
         "patch": patch,
         "approval_id": approval_id,
-        "error": "apply_config_patch requires policy enforcement and node command transport; planned for a later phase.",
+        "queued_at": datetime.now(timezone.utc).isoformat(),
     }
+    db.add_pending_command(command)
+
+    return {
+        "ok": True,
+        "queued": True,
+        "command_id": command_id,
+        "device_id": device_id,
+        "status": "queued",
+        "patch_keys": list(patch.keys()),
+        "approval_id": approval_id,
+        "message": (
+            "Config patch queued. The node will apply it on its next wake cycle "
+            "when Phase 2 node command polling is active."
+        ),
+    }
+
+
+def list_pending_commands(
+    context: ToolContext,
+    device_id: str | None = None,
+    status: str | None = None,
+) -> dict[str, Any]:
+    """Return pending commands queued for field nodes."""
+
+    commands = context.db.list_pending_commands(device_id=device_id, status=status)
+    return {
+        "ok": True,
+        "device_id": device_id,
+        "status_filter": status,
+        "count": len(commands),
+        "commands": commands,
+    }
+
+
+def _validate_config_patch(patch: dict[str, Any]) -> None:
+    """Reject patches that reference protected keys."""
+
+    protected = {"device_id", "deployment_id", "firmware", "hardware"}
+    bad_keys = protected & set(patch.keys())
+    if bad_keys:
+        raise ValueError(f"patch must not modify protected keys: {sorted(bad_keys)}")
 
 
 def _summary_sentence(event_count: int, event_counts: Counter[str], label_counts: Counter[str]) -> str:

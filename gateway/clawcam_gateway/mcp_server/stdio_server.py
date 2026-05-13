@@ -54,6 +54,18 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "list_pending_commands",
+        "description": "Return commands queued for field nodes (captures, config patches). Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "device_id": {"type": "string", "description": "Filter by device ID."},
+                "status": {"type": "string", "enum": ["queued", "delivered", "executed", "failed"],
+                           "description": "Filter by command status."},
+            },
+        },
+    },
+    {
         "name": "capture_now",
         "description": "Request a manual capture from a reachable ClawCam node. This is approval-gated and not implemented in Phase 1.",
         "inputSchema": {

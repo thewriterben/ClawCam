@@ -7,6 +7,7 @@ from clawcam_gateway.tools.clawcam_tools import (
     generate_daily_summary,
     get_node_health,
     get_recent_detections,
+    list_pending_commands,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "generate_daily_summary",
     "get_node_health",
     "get_recent_detections",
+    "list_pending_commands",
 ]
