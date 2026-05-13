@@ -1,0 +1,787 @@
+From 8acc5eb5e9a6659aa512df4bd51a050840d7ec54 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 13 May 2026 20:51:19 +0000
+Subject: [PATCH] Add firmware Wi-Fi manager component
+
+Introduce clawcam_wifi_manager as the dedicated firmware component for STA
+connection management. It exposes SSID/password configuration plus a
+provisioning-mode flag via Kconfig, applies a connect timeout and retry
+policy, and reports connection health (status string, RSSI, retry count,
+last connect duration) for diagnostics.
+
+main.c now consults the Wi-Fi manager before any gateway upload attempt;
+SD-card media, metadata, and event-JSON persistence run unconditionally so
+the offline source of truth is independent of network success. When Wi-Fi
+is disabled, in provisioning mode, or fails to associate within the
+configured timeout/retry budget, the upload is skipped and the firmware
+continues with SD-only behavior.
+---
+ .../clawcam_node_espidf/BUILD_ESP32_S3_EYE.md |   7 +-
+ .../MIGRATION_FROM_WILDCAM.md                 |   2 +
+ firmware/clawcam_node_espidf/README.md        |   3 +-
+ .../clawcam_wifi_manager/CMakeLists.txt       |   5 +
+ .../components/clawcam_wifi_manager/Kconfig   |  60 ++++
+ .../clawcam_wifi_manager.c                    | 320 ++++++++++++++++++
+ .../include/clawcam_wifi_manager.h            |  91 +++++
+ .../clawcam_node_espidf/main/CMakeLists.txt   |   2 +-
+ firmware/clawcam_node_espidf/main/main.c      |  77 ++++-
+ .../sdkconfig.defaults.esp32s3_eye            |   7 +
+ .../test_firmware_migration_scaffold.py       | 103 ++++++
+ 11 files changed, 664 insertions(+), 13 deletions(-)
+ create mode 100644 firmware/clawcam_node_espidf/components/clawcam_wifi_manager/CMakeLists.txt
+ create mode 100644 firmware/clawcam_node_espidf/components/clawcam_wifi_manager/Kconfig
+ create mode 100644 firmware/clawcam_node_espidf/components/clawcam_wifi_manager/clawcam_wifi_manager.c
+ create mode 100644 firmware/clawcam_node_espidf/components/clawcam_wifi_manager/include/clawcam_wifi_manager.h
+
+diff --git a/firmware/clawcam_node_espidf/BUILD_ESP32_S3_EYE.md b/firmware/clawcam_node_espidf/BUILD_ESP32_S3_EYE.md
+index 9bc1fcc..16a6029 100644
+--- a/firmware/clawcam_node_espidf/BUILD_ESP32_S3_EYE.md
++++ b/firmware/clawcam_node_espidf/BUILD_ESP32_S3_EYE.md
+@@ -28,7 +28,7 @@ idf.py -p /dev/ttyACM0 flash monitor
+ 
+ ## Expected Smoke-Test Behavior
+ 
+-When `CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT=y`, the firmware should initialize the ESP32-S3-EYE camera pin map, attempt one JPEG capture, log the captured frame length and dimensions, and release the framebuffer. If `CONFIG_CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE=y`, a successful capture is also written to `/sdcard/media`, paired smoke-test metadata is written to `/sdcard/metadata`, and a gateway-ingestible `clawcam.event.v1`-shape event artifact is written to `/sdcard/events`. If `CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED=y`, the firmware also attempts to register the bench node and POST the generated event JSON to the gateway API. SD-card artifacts remain the offline source of truth; upload failure is logged but does not delete or alter local artifacts. If the camera, storage, or gateway client path is disabled or unavailable, the firmware logs the failure and uses `ESP_ERR_NOT_SUPPORTED` or a concrete ESP-IDF error rather than pretending success.
++When `CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT=y`, the firmware should initialize the ESP32-S3-EYE camera pin map, attempt one JPEG capture, log the captured frame length and dimensions, and release the framebuffer. If `CONFIG_CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE=y`, a successful capture is also written to `/sdcard/media`, paired smoke-test metadata is written to `/sdcard/metadata`, and a gateway-ingestible `clawcam.event.v1`-shape event artifact is written to `/sdcard/events`. If `CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED=y`, the firmware also attempts to register the bench node and POST the generated event JSON to the gateway API. The gateway upload is preceded by a call into the `clawcam_wifi_manager`; when `CONFIG_CLAWCAM_WIFI_ENABLED=y` and STA credentials are provided, the manager blocks up to `CONFIG_CLAWCAM_WIFI_CONNECT_TIMEOUT_MS` and retries up to `CONFIG_CLAWCAM_WIFI_MAX_RETRIES` times before failing. SD-card artifacts remain the offline source of truth; Wi-Fi failure, upload failure, or disabled Wi-Fi is logged but does not delete or alter local artifacts. If the camera, storage, Wi-Fi, or gateway client path is disabled or unavailable, the firmware logs the failure and uses `ESP_ERR_NOT_SUPPORTED` or a concrete ESP-IDF error rather than pretending success.
+ 
+ ## Promotion Criteria
+ 
+@@ -43,8 +43,9 @@ When `CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT=y`, the firmware should initializ
+ | Media persistence | Captured JPEG is saved under `/sdcard/media`. |
+ | Metadata persistence | JSON metadata is saved under `/sdcard/metadata`. |
+ | Event artifact | Gateway-compatible event JSON is saved under `/sdcard/events`. |
+-| Optional upload | If enabled, firmware registers the node via `/api/v1/devices` and uploads the event via `/api/v1/events`. |
+-| Next port | Add Wi-Fi provisioning so the upload path can run after a real network connection is established. |
++| Wi-Fi connect | If `CONFIG_CLAWCAM_WIFI_ENABLED=y`, the manager reports `status=connected` within the configured timeout and surfaces a non-zero RSSI before the upload step. |
++| Optional upload | If enabled, firmware registers the node via `/api/v1/devices` and uploads the event via `/api/v1/events` only after Wi-Fi reports `connected`. |
++| Next port | Add a provisioning transport (SoftAP/captive portal or BLE) behind `CONFIG_CLAWCAM_WIFI_PROVISIONING_MODE` so credentials can be supplied without rebuilding firmware. |
+ 
+ ## References
+ 
+diff --git a/firmware/clawcam_node_espidf/MIGRATION_FROM_WILDCAM.md b/firmware/clawcam_node_espidf/MIGRATION_FROM_WILDCAM.md
+index ca33326..99d3fce 100644
+--- a/firmware/clawcam_node_espidf/MIGRATION_FROM_WILDCAM.md
++++ b/firmware/clawcam_node_espidf/MIGRATION_FROM_WILDCAM.md
+@@ -16,6 +16,7 @@ ClawCam firmware must remain deterministic before it becomes agentic. The first
+ | `include/PowerManager.h`, `src/PowerManager.cpp`, `firmware/power/*` | `components/clawcam_power` | Battery voltage/percentage, low-battery policy, wake sources, deep sleep. |
+ | `include/TimeManager.h`, `src/TimeManager.cpp` | Future `components/clawcam_time` or `clawcam_events` utility | RTC/NTP/GPS-aware event timestamps. |
+ | `include/SensorManager.h`, `src/SensorManager.cpp` | `components/clawcam_sensors` | Environmental, GPS, and light readings. |
++| `include/WiFiManager.h`, `src/WiFiManager.cpp` | `components/clawcam_wifi_manager` | STA connect/retry/timeout policy, connection health reporting, and a placeholder provisioning mode. SD-card artifact creation stays independent from Wi-Fi state. |
+ 
+ ## Minimum Capture Loop
+ 
+@@ -47,6 +48,7 @@ The new ESP-IDF components expose C APIs with explicit config and result structs
+ | Motion | `clawcam_motion.h` | `clawcam_motion_config_t`, `clawcam_motion_event_t` |
+ | Storage | `clawcam_storage.h` | `clawcam_storage_config_t`, `clawcam_storage_health_t` |
+ | Power | `clawcam_power.h` | `clawcam_power_config_t`, `clawcam_power_state_t`, `clawcam_power_profile_t` |
++| Wi-Fi | `clawcam_wifi_manager.h` | `clawcam_wifi_config_t`, `clawcam_wifi_status_t`, `clawcam_wifi_mode_t` |
+ 
+ ## Non-Goals for This Step
+ 
+diff --git a/firmware/clawcam_node_espidf/README.md b/firmware/clawcam_node_espidf/README.md
+index 55fd254..1669b2d 100644
+--- a/firmware/clawcam_node_espidf/README.md
++++ b/firmware/clawcam_node_espidf/README.md
+@@ -12,6 +12,7 @@ This directory will contain the next-generation ClawCam field node firmware. It
+ | `clawcam_storage` | Local media and JSON metadata storage. |
+ | `clawcam_sensors` | Environmental, GPS, light, and optional external sensors. |
+ | `clawcam_events` | Event creation, queueing, serialization, and gateway publication. |
++| `clawcam_wifi_manager` | Wi-Fi STA bring-up, retry/timeout policy, and connection health for optional upload paths. SD-card artifacts remain independent of Wi-Fi state. |
+ | `clawcam_capabilities` | ESP-Claw-compatible wildlife capability group surface. |
+ 
+ ## First Firmware Milestone
+@@ -24,7 +25,7 @@ The first concrete board target is `boards/esp32_s3_eye_v22.json`. It provides a
+ 
+ The hardware path is intentionally gated. When the option is disabled or the driver is unavailable, the camera component remains scaffold-safe and `clawcam_camera_capture()` returns `ESP_ERR_NOT_SUPPORTED` rather than pretending capture is implemented.
+ 
+-Use `BUILD_ESP32_S3_EYE.md` and `sdkconfig.defaults.esp32s3_eye` for the first bench build. That profile enables PSRAM, the gated `esp32-camera` path, the gated SD/FATFS storage path, and `CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT`, which performs one safe capture attempt, logs JPEG frame details, optionally writes the JPEG under `/sdcard/media`, writes paired metadata under `/sdcard/metadata`, writes a gateway-compatible event artifact under `/sdcard/events`, and releases the framebuffer. The `clawcam_gateway_client` component adds an optional HTTP upload path for `/api/v1/devices` and `/api/v1/events`; SD-card artifacts remain the offline source of truth if upload is disabled or fails.
++Use `BUILD_ESP32_S3_EYE.md` and `sdkconfig.defaults.esp32s3_eye` for the first bench build. That profile enables PSRAM, the gated `esp32-camera` path, the gated SD/FATFS storage path, and `CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT`, which performs one safe capture attempt, logs JPEG frame details, optionally writes the JPEG under `/sdcard/media`, writes paired metadata under `/sdcard/metadata`, writes a gateway-compatible event artifact under `/sdcard/events`, and releases the framebuffer. The `clawcam_gateway_client` component adds an optional HTTP upload path for `/api/v1/devices` and `/api/v1/events`; SD-card artifacts remain the offline source of truth if upload is disabled or fails. The `clawcam_wifi_manager` component owns the STA connection and is consulted before any gateway upload attempt — when Wi-Fi is disabled, in provisioning mode, or fails to connect within `CONFIG_CLAWCAM_WIFI_CONNECT_TIMEOUT_MS`, the upload is skipped and SD remains the only record of the event.
+ 
+ ## ESP-Claw Integration Direction
+ 
+diff --git a/firmware/clawcam_node_espidf/components/clawcam_wifi_manager/CMakeLists.txt b/firmware/clawcam_node_espidf/components/clawcam_wifi_manager/CMakeLists.txt
+new file mode 100644
+index 0000000..33d69bb
+--- /dev/null
++++ b/firmware/clawcam_node_espidf/components/clawcam_wifi_manager/CMakeLists.txt
+@@ -0,0 +1,5 @@
++idf_component_register(
++    SRCS "clawcam_wifi_manager.c"
++    INCLUDE_DIRS "include"
++    REQUIRES esp_wifi esp_event esp_netif esp_timer
++)
+diff --git a/firmware/clawcam_node_espidf/components/clawcam_wifi_manager/Kconfig b/firmware/clawcam_node_espidf/components/clawcam_wifi_manager/Kconfig
+new file mode 100644
+index 0000000..80c6544
+--- /dev/null
++++ b/firmware/clawcam_node_espidf/components/clawcam_wifi_manager/Kconfig
+@@ -0,0 +1,60 @@
++menu "ClawCam Wi-Fi Manager"
++
++config CLAWCAM_WIFI_ENABLED
++    bool "Enable ClawCam Wi-Fi STA path"
++    default n
++    help
++        Enable the firmware Wi-Fi station path. When disabled, the Wi-Fi
++        manager initializes in offline-first scaffold mode and connection
++        attempts return ESP_ERR_NOT_SUPPORTED. SD-card artifact creation
++        (media, metadata, event JSON) is intentionally independent from this
++        setting so the device continues to log captures when the network is
++        unavailable.
++
++config CLAWCAM_WIFI_PROVISIONING_MODE
++    bool "Boot into provisioning mode instead of STA"
++    default n
++    depends on CLAWCAM_WIFI_ENABLED
++    help
++        Mark the manager as provisioning-mode at boot. The provisioning
++        transport is not yet implemented; this flag is exposed so future
++        provisioning code can be added without breaking the public API.
++        While set, clawcam_wifi_connect() returns ESP_ERR_NOT_SUPPORTED and
++        firmware should treat the device as offline.
++
++config CLAWCAM_WIFI_SSID
++    string "Wi-Fi STA SSID"
++    default ""
++    depends on CLAWCAM_WIFI_ENABLED
++    help
++        SSID used for the station-mode connection attempt.
++
++config CLAWCAM_WIFI_PASSWORD
++    string "Wi-Fi STA password"
++    default ""
++    depends on CLAWCAM_WIFI_ENABLED
++    help
++        Password for the station-mode connection. Leave empty for open
++        networks. Values should be supplied via build secrets or a board
++        sdkconfig, not committed.
++
++config CLAWCAM_WIFI_CONNECT_TIMEOUT_MS
++    int "Wi-Fi connect timeout (ms)"
++    default 10000
++    range 1000 120000
++    depends on CLAWCAM_WIFI_ENABLED
++    help
++        Maximum time clawcam_wifi_connect() blocks before returning
++        ESP_ERR_TIMEOUT. The firmware should treat any non-OK result as
++        offline and continue with SD-card-first behavior.
++
++config CLAWCAM_WIFI_MAX_RETRIES
++    int "Wi-Fi connect max retries"
++    default 3
++    range 0 20
++    depends on CLAWCAM_WIFI_ENABLED
++    help
++        Number of reconnect attempts on STA disconnect before reporting
++        failure for the current connect call.
++
++endmenu
+diff --git a/firmware/clawcam_node_espidf/components/clawcam_wifi_manager/clawcam_wifi_manager.c b/firmware/clawcam_node_espidf/components/clawcam_wifi_manager/clawcam_wifi_manager.c
+new file mode 100644
+index 0000000..7d8b06b
+--- /dev/null
++++ b/firmware/clawcam_node_espidf/components/clawcam_wifi_manager/clawcam_wifi_manager.c
+@@ -0,0 +1,320 @@
++#include "clawcam_wifi_manager.h"
++
++#include <string.h>
++#include "esp_log.h"
++#include "esp_timer.h"
++
++#if defined(__has_include)
++#  if __has_include("freertos/FreeRTOS.h") && __has_include("freertos/event_groups.h")
++#    include "freertos/FreeRTOS.h"
++#    include "freertos/event_groups.h"
++#    include "freertos/task.h"
++#    define CLAWCAM_HAVE_FREERTOS 1
++#  else
++#    define CLAWCAM_HAVE_FREERTOS 0
++#  endif
++#  if __has_include("esp_wifi.h") && __has_include("esp_event.h") && __has_include("esp_netif.h")
++#    include "esp_event.h"
++#    include "esp_netif.h"
++#    include "esp_wifi.h"
++#    define CLAWCAM_HAVE_ESP_WIFI 1
++#  else
++#    define CLAWCAM_HAVE_ESP_WIFI 0
++#  endif
++#else
++#  define CLAWCAM_HAVE_FREERTOS 0
++#  define CLAWCAM_HAVE_ESP_WIFI 0
++#endif
++
++#ifndef CONFIG_CLAWCAM_WIFI_ENABLED
++#define CONFIG_CLAWCAM_WIFI_ENABLED 0
++#endif
++
++#ifndef CONFIG_CLAWCAM_WIFI_PROVISIONING_MODE
++#define CONFIG_CLAWCAM_WIFI_PROVISIONING_MODE 0
++#endif
++
++#ifndef CONFIG_CLAWCAM_WIFI_SSID
++#define CONFIG_CLAWCAM_WIFI_SSID ""
++#endif
++
++#ifndef CONFIG_CLAWCAM_WIFI_PASSWORD
++#define CONFIG_CLAWCAM_WIFI_PASSWORD ""
++#endif
++
++#ifndef CONFIG_CLAWCAM_WIFI_CONNECT_TIMEOUT_MS
++#define CONFIG_CLAWCAM_WIFI_CONNECT_TIMEOUT_MS 10000
++#endif
++
++#ifndef CONFIG_CLAWCAM_WIFI_MAX_RETRIES
++#define CONFIG_CLAWCAM_WIFI_MAX_RETRIES 3
++#endif
++
++static const char *TAG = "clawcam_wifi";
++
++#define CLAWCAM_WIFI_CONNECTED_BIT BIT0
++#define CLAWCAM_WIFI_FAILED_BIT    BIT1
++
++static clawcam_wifi_config_t s_config = {0};
++static bool s_initialized = false;
++static bool s_connected = false;
++static uint8_t s_retry_count = 0;
++static uint32_t s_last_connect_duration_ms = 0;
++static int s_last_rssi = 0;
++
++#if CONFIG_CLAWCAM_WIFI_ENABLED && CLAWCAM_HAVE_ESP_WIFI && CLAWCAM_HAVE_FREERTOS
++static EventGroupHandle_t s_wifi_event_group = NULL;
++static esp_event_handler_instance_t s_handler_any_id = NULL;
++static esp_event_handler_instance_t s_handler_got_ip = NULL;
++
++static void wifi_event_handler(void *arg, esp_event_base_t event_base,
++                               int32_t event_id, void *event_data)
++{
++    (void)arg;
++    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
++        esp_wifi_connect();
++    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
++        s_connected = false;
++        if (s_retry_count < s_config.max_retries) {
++            s_retry_count++;
++            ESP_LOGW(TAG, "Wi-Fi disconnected; retry %u/%u", s_retry_count, s_config.max_retries);
++            esp_wifi_connect();
++        } else {
++            ESP_LOGE(TAG, "Wi-Fi retries exhausted (%u); giving up for this attempt", s_config.max_retries);
++            if (s_wifi_event_group) {
++                xEventGroupSetBits(s_wifi_event_group, CLAWCAM_WIFI_FAILED_BIT);
++            }
++        }
++    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
++        s_connected = true;
++        ESP_LOGI(TAG, "Wi-Fi got IP");
++        if (s_wifi_event_group) {
++            xEventGroupSetBits(s_wifi_event_group, CLAWCAM_WIFI_CONNECTED_BIT);
++        }
++    }
++}
++#endif
++
++esp_err_t clawcam_wifi_default_config(clawcam_wifi_config_t *config)
++{
++    if (config == NULL) {
++        return ESP_ERR_INVALID_ARG;
++    }
++    if (CONFIG_CLAWCAM_WIFI_PROVISIONING_MODE) {
++        config->mode = CLAWCAM_WIFI_MODE_PROVISIONING;
++    } else if (CONFIG_CLAWCAM_WIFI_ENABLED) {
++        config->mode = CLAWCAM_WIFI_MODE_STA;
++    } else {
++        config->mode = CLAWCAM_WIFI_MODE_DISABLED;
++    }
++    config->ssid = CONFIG_CLAWCAM_WIFI_SSID;
++    config->password = CONFIG_CLAWCAM_WIFI_PASSWORD;
++    config->connect_timeout_ms = CONFIG_CLAWCAM_WIFI_CONNECT_TIMEOUT_MS;
++    config->max_retries = CONFIG_CLAWCAM_WIFI_MAX_RETRIES;
++    return ESP_OK;
++}
++
++esp_err_t clawcam_wifi_init(const clawcam_wifi_config_t *config)
++{
++    if (config == NULL) {
++        return ESP_ERR_INVALID_ARG;
++    }
++    s_config = *config;
++    s_connected = false;
++    s_retry_count = 0;
++    s_last_connect_duration_ms = 0;
++    s_last_rssi = 0;
++
++    if (s_config.mode == CLAWCAM_WIFI_MODE_DISABLED) {
++        s_initialized = true;
++        ESP_LOGI(TAG, "Wi-Fi disabled; ClawCam remains offline-first and SD artifacts continue independently");
++        return ESP_OK;
++    }
++
++    if (s_config.mode == CLAWCAM_WIFI_MODE_PROVISIONING) {
++        s_initialized = true;
++        ESP_LOGW(TAG, "Wi-Fi provisioning mode requested; provisioning transport not yet implemented, treat as offline until completed");
++        return ESP_OK;
++    }
++
++#if CONFIG_CLAWCAM_WIFI_ENABLED && CLAWCAM_HAVE_ESP_WIFI && CLAWCAM_HAVE_FREERTOS
++    s_wifi_event_group = xEventGroupCreate();
++    if (s_wifi_event_group == NULL) {
++        return ESP_ERR_NO_MEM;
++    }
++
++    esp_err_t err = esp_netif_init();
++    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
++        return err;
++    }
++    err = esp_event_loop_create_default();
++    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
++        return err;
++    }
++    esp_netif_create_default_wifi_sta();
++
++    wifi_init_config_t init_cfg = WIFI_INIT_CONFIG_DEFAULT();
++    err = esp_wifi_init(&init_cfg);
++    if (err != ESP_OK) {
++        return err;
++    }
++
++    err = esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
++                                              &wifi_event_handler, NULL,
++                                              &s_handler_any_id);
++    if (err != ESP_OK) {
++        return err;
++    }
++    err = esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
++                                              &wifi_event_handler, NULL,
++                                              &s_handler_got_ip);
++    if (err != ESP_OK) {
++        return err;
++    }
++
++    wifi_config_t wifi_cfg = {0};
++    strlcpy((char *)wifi_cfg.sta.ssid, s_config.ssid ? s_config.ssid : "", sizeof(wifi_cfg.sta.ssid));
++    strlcpy((char *)wifi_cfg.sta.password, s_config.password ? s_config.password : "", sizeof(wifi_cfg.sta.password));
++    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
++    err = esp_wifi_set_mode(WIFI_MODE_STA);
++    if (err != ESP_OK) {
++        return err;
++    }
++    err = esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
++    if (err != ESP_OK) {
++        return err;
++    }
++
++    s_initialized = true;
++    ESP_LOGI(TAG, "Wi-Fi manager initialized for SSID '%s' (timeout=%ums retries=%u)",
++             (const char *)wifi_cfg.sta.ssid,
++             (unsigned)s_config.connect_timeout_ms,
++             (unsigned)s_config.max_retries);
++    return ESP_OK;
++#else
++    s_initialized = true;
++    ESP_LOGW(TAG, "Wi-Fi manager initialized in scaffold mode; enable CONFIG_CLAWCAM_WIFI_ENABLED with ESP-IDF Wi-Fi support for real connection attempts");
++    return ESP_OK;
++#endif
++}
++
++esp_err_t clawcam_wifi_connect(void)
++{
++    if (!s_initialized) {
++        return ESP_ERR_INVALID_STATE;
++    }
++    if (s_config.mode == CLAWCAM_WIFI_MODE_DISABLED) {
++        return ESP_ERR_NOT_SUPPORTED;
++    }
++    if (s_config.mode == CLAWCAM_WIFI_MODE_PROVISIONING) {
++        ESP_LOGW(TAG, "Wi-Fi connect requested while in provisioning mode; no STA credentials applied");
++        return ESP_ERR_NOT_SUPPORTED;
++    }
++
++#if CONFIG_CLAWCAM_WIFI_ENABLED && CLAWCAM_HAVE_ESP_WIFI && CLAWCAM_HAVE_FREERTOS
++    if (s_wifi_event_group == NULL) {
++        return ESP_ERR_INVALID_STATE;
++    }
++    xEventGroupClearBits(s_wifi_event_group, CLAWCAM_WIFI_CONNECTED_BIT | CLAWCAM_WIFI_FAILED_BIT);
++    s_retry_count = 0;
++
++    int64_t start_us = esp_timer_get_time();
++    esp_err_t err = esp_wifi_start();
++    if (err != ESP_OK && err != ESP_ERR_WIFI_CONN) {
++        return err;
++    }
++
++    TickType_t timeout_ticks = pdMS_TO_TICKS(s_config.connect_timeout_ms > 0
++                                                 ? s_config.connect_timeout_ms
++                                                 : CONFIG_CLAWCAM_WIFI_CONNECT_TIMEOUT_MS);
++    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
++                                           CLAWCAM_WIFI_CONNECTED_BIT | CLAWCAM_WIFI_FAILED_BIT,
++                                           pdFALSE, pdFALSE, timeout_ticks);
++    s_last_connect_duration_ms = (uint32_t)((esp_timer_get_time() - start_us) / 1000);
++
++    if (bits & CLAWCAM_WIFI_CONNECTED_BIT) {
++        wifi_ap_record_t ap = {0};
++        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
++            s_last_rssi = ap.rssi;
++        }
++        ESP_LOGI(TAG, "Wi-Fi connected in %ums (rssi=%d)", (unsigned)s_last_connect_duration_ms, s_last_rssi);
++        return ESP_OK;
++    }
++    if (bits & CLAWCAM_WIFI_FAILED_BIT) {
++        ESP_LOGW(TAG, "Wi-Fi connect failed after %u retries", (unsigned)s_retry_count);
++        return ESP_FAIL;
++    }
++    ESP_LOGW(TAG, "Wi-Fi connect timed out after %ums", (unsigned)s_config.connect_timeout_ms);
++    return ESP_ERR_TIMEOUT;
++#else
++    s_retry_count++;
++    ESP_LOGW(TAG, "Wi-Fi connect requested but hardware path is scaffolded; SD-card artifacts continue independently");
++    return ESP_ERR_NOT_SUPPORTED;
++#endif
++}
++
++bool clawcam_wifi_is_connected(void)
++{
++    return s_connected;
++}
++
++esp_err_t clawcam_wifi_get_status(clawcam_wifi_status_t *status)
++{
++    if (status == NULL) {
++        return ESP_ERR_INVALID_ARG;
++    }
++    status->initialized = s_initialized;
++    status->connected = s_connected;
++    status->mode = s_config.mode;
++    status->rssi = s_last_rssi;
++    status->retry_count = s_retry_count;
++    status->last_connect_duration_ms = s_last_connect_duration_ms;
++    if (!s_initialized) {
++        status->status = "not_initialized";
++    } else if (s_config.mode == CLAWCAM_WIFI_MODE_DISABLED) {
++        status->status = "disabled";
++    } else if (s_config.mode == CLAWCAM_WIFI_MODE_PROVISIONING) {
++        status->status = "provisioning";
++    } else if (s_connected) {
++        status->status = "connected";
++    } else {
++        status->status = "offline";
++    }
++    return ESP_OK;
++}
++
++esp_err_t clawcam_wifi_disconnect(void)
++{
++#if CONFIG_CLAWCAM_WIFI_ENABLED && CLAWCAM_HAVE_ESP_WIFI && CLAWCAM_HAVE_FREERTOS
++    if (s_initialized && s_config.mode == CLAWCAM_WIFI_MODE_STA) {
++        esp_wifi_disconnect();
++    }
++#endif
++    s_connected = false;
++    return ESP_OK;
++}
++
++esp_err_t clawcam_wifi_deinit(void)
++{
++#if CONFIG_CLAWCAM_WIFI_ENABLED && CLAWCAM_HAVE_ESP_WIFI && CLAWCAM_HAVE_FREERTOS
++    if (s_initialized && s_config.mode == CLAWCAM_WIFI_MODE_STA) {
++        esp_wifi_stop();
++        esp_wifi_deinit();
++    }
++    if (s_handler_any_id) {
++        esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, s_handler_any_id);
++        s_handler_any_id = NULL;
++    }
++    if (s_handler_got_ip) {
++        esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, s_handler_got_ip);
++        s_handler_got_ip = NULL;
++    }
++    if (s_wifi_event_group) {
++        vEventGroupDelete(s_wifi_event_group);
++        s_wifi_event_group = NULL;
++    }
++#endif
++    s_initialized = false;
++    s_connected = false;
++    return ESP_OK;
++}
+diff --git a/firmware/clawcam_node_espidf/components/clawcam_wifi_manager/include/clawcam_wifi_manager.h b/firmware/clawcam_node_espidf/components/clawcam_wifi_manager/include/clawcam_wifi_manager.h
+new file mode 100644
+index 0000000..159ccfd
+--- /dev/null
++++ b/firmware/clawcam_node_espidf/components/clawcam_wifi_manager/include/clawcam_wifi_manager.h
+@@ -0,0 +1,91 @@
++#pragma once
++
++#include <stdbool.h>
++#include <stdint.h>
++#include "esp_err.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/*
++ * ClawCam Wi-Fi manager
++ *
++ * This component is intentionally separate from the gateway client and from
++ * SD/FATFS artifact creation. SD-card media, metadata, and event artifacts
++ * MUST remain the offline source of truth and are not gated by Wi-Fi state.
++ * The Wi-Fi manager is only consulted before optional network operations such
++ * as a gateway HTTP upload.
++ *
++ * Modes:
++ *   DISABLED      - Wi-Fi is intentionally off; all connect calls return
++ *                   ESP_ERR_NOT_SUPPORTED and ClawCam remains offline-first.
++ *   STA           - Station mode using configured SSID/password.
++ *   PROVISIONING  - Reserved provisioning entry point. The provisioning
++ *                   transport itself is not implemented in this scaffold;
++ *                   the mode is exposed so that firmware can signal the
++ *                   intent and so future provisioning code can be added
++ *                   without breaking the public API.
++ */
++typedef enum {
++    CLAWCAM_WIFI_MODE_DISABLED = 0,
++    CLAWCAM_WIFI_MODE_STA = 1,
++    CLAWCAM_WIFI_MODE_PROVISIONING = 2,
++} clawcam_wifi_mode_t;
++
++typedef struct {
++    clawcam_wifi_mode_t mode;
++    const char *ssid;
++    const char *password;
++    uint32_t connect_timeout_ms;
++    uint8_t max_retries;
++} clawcam_wifi_config_t;
++
++typedef struct {
++    bool initialized;
++    bool connected;
++    clawcam_wifi_mode_t mode;
++    int rssi;
++    uint8_t retry_count;
++    uint32_t last_connect_duration_ms;
++    const char *status;
++} clawcam_wifi_status_t;
++
++/*
++ * Populate config from Kconfig defaults. Safe to call before init.
++ */
++esp_err_t clawcam_wifi_default_config(clawcam_wifi_config_t *config);
++
++/*
++ * Initialize the Wi-Fi manager. Does not start a connection attempt. When the
++ * ESP-IDF Wi-Fi stack is not available (host builds, scaffold mode), this
++ * still returns ESP_OK so SD-card persistence stays unaffected by Wi-Fi.
++ */
++esp_err_t clawcam_wifi_init(const clawcam_wifi_config_t *config);
++
++/*
++ * Block until the Wi-Fi manager either reports a connection or exhausts
++ * config->max_retries / config->connect_timeout_ms. Returns ESP_ERR_TIMEOUT
++ * if the timeout expires without a connection and ESP_ERR_NOT_SUPPORTED if
++ * the manager is in DISABLED mode. Callers should treat any non-OK result
++ * as "no network" and continue with SD-card-first behavior.
++ */
++esp_err_t clawcam_wifi_connect(void);
++
++/*
++ * Lightweight, non-blocking status check.
++ */
++bool clawcam_wifi_is_connected(void);
++
++/*
++ * Report current connection health. Always populates the status struct, even
++ * when Wi-Fi is disabled.
++ */
++esp_err_t clawcam_wifi_get_status(clawcam_wifi_status_t *status);
++
++esp_err_t clawcam_wifi_disconnect(void);
++esp_err_t clawcam_wifi_deinit(void);
++
++#ifdef __cplusplus
++}
++#endif
+diff --git a/firmware/clawcam_node_espidf/main/CMakeLists.txt b/firmware/clawcam_node_espidf/main/CMakeLists.txt
+index adefd0e..8df287c 100644
+--- a/firmware/clawcam_node_espidf/main/CMakeLists.txt
++++ b/firmware/clawcam_node_espidf/main/CMakeLists.txt
+@@ -1,5 +1,5 @@
+ idf_component_register(
+     SRCS "main.c"
+     INCLUDE_DIRS "."
+-    REQUIRES clawcam_camera clawcam_motion clawcam_storage clawcam_power clawcam_events clawcam_gateway_client
++    REQUIRES clawcam_camera clawcam_motion clawcam_storage clawcam_power clawcam_events clawcam_gateway_client clawcam_wifi_manager
+ )
+diff --git a/firmware/clawcam_node_espidf/main/main.c b/firmware/clawcam_node_espidf/main/main.c
+index 971be09..02146de 100644
+--- a/firmware/clawcam_node_espidf/main/main.c
++++ b/firmware/clawcam_node_espidf/main/main.c
+@@ -20,6 +20,7 @@
+ #include "clawcam_motion.h"
+ #include "clawcam_power.h"
+ #include "clawcam_storage.h"
++#include "clawcam_wifi_manager.h"
+ 
+ #ifndef CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT
+ #define CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT 0
+@@ -37,6 +38,10 @@
+ #define CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED 0
+ #endif
+ 
++#ifndef CONFIG_CLAWCAM_WIFI_ENABLED
++#define CONFIG_CLAWCAM_WIFI_ENABLED 0
++#endif
++
+ static const char *TAG = "clawcam_node";
+ 
+ static void init_components(void)
+@@ -65,6 +70,44 @@ static void init_components(void)
+     }
+     ESP_ERROR_CHECK(clawcam_camera_init(&camera_config));
+     ESP_ERROR_CHECK(clawcam_motion_init(&motion_config));
++
++    clawcam_wifi_config_t wifi_config;
++    ESP_ERROR_CHECK(clawcam_wifi_default_config(&wifi_config));
++    esp_err_t wifi_err = clawcam_wifi_init(&wifi_config);
++    if (wifi_err != ESP_OK) {
++        ESP_LOGW(TAG, "Wi-Fi manager init returned %s; SD-card artifacts continue independently", esp_err_to_name(wifi_err));
++    }
++}
++
++static bool ensure_network_for_upload(void)
++{
++    clawcam_wifi_status_t wifi_status;
++    if (clawcam_wifi_get_status(&wifi_status) != ESP_OK) {
++        ESP_LOGW(TAG, "could not read Wi-Fi status; skipping gateway upload, SD event remains source of truth");
++        return false;
++    }
++    if (wifi_status.mode == CLAWCAM_WIFI_MODE_DISABLED) {
++        ESP_LOGI(TAG, "Wi-Fi disabled; skipping gateway upload, SD event remains source of truth");
++        return false;
++    }
++    if (wifi_status.mode == CLAWCAM_WIFI_MODE_PROVISIONING) {
++        ESP_LOGW(TAG, "Wi-Fi in provisioning mode; skipping gateway upload, SD event remains source of truth");
++        return false;
++    }
++    if (!wifi_status.connected) {
++        esp_err_t err = clawcam_wifi_connect();
++        if (err != ESP_OK) {
++            ESP_LOGW(TAG, "Wi-Fi connect before upload failed: %s; SD event remains source of truth", esp_err_to_name(err));
++            return false;
++        }
++    }
++    clawcam_wifi_get_status(&wifi_status);
++    ESP_LOGI(TAG, "Wi-Fi health: status=%s rssi=%d retry=%u connect_ms=%u",
++             wifi_status.status,
++             wifi_status.rssi,
++             (unsigned)wifi_status.retry_count,
++             (unsigned)wifi_status.last_connect_duration_ms);
++    return wifi_status.connected;
+ }
+ 
+ static void persist_smoke_test_capture(const clawcam_camera_capture_t *capture)
+@@ -141,16 +184,25 @@ static void persist_smoke_test_capture(const clawcam_camera_capture_t *capture)
+     }
+ 
+ #if CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED
+-    clawcam_gateway_client_config_t gateway_config;
+-    ESP_ERROR_CHECK(clawcam_gateway_client_default_config(&gateway_config));
+-    const char *device_json = "{\"device_id\":\"esp32-s3-eye-v2.2-bench-node\",\"device_type\":\"node\",\"name\":\"ESP32-S3-EYE Bench Node\",\"hardware\":{\"board\":\"esp32-s3-eye-v2.2\",\"mcu\":\"esp32-s3\",\"camera\":\"ov2640\",\"storage\":\"sd/fatfs\"},\"firmware\":{\"name\":\"clawcam-node-espidf\",\"version\":\"0.1.0\",\"source\":\"bench-firmware\"},\"deployment_id\":\"hardware-bench\",\"capabilities\":[\"camera\",\"sd_fatfs\",\"event_artifact\",\"gateway_upload\"],\"status\":\"active\",\"created_at\":\"1970-01-01T00:00:00Z\",\"last_seen_at\":\"1970-01-01T00:00:00Z\",\"metadata\":{\"firmware_generated\":true}}";
+-    err = clawcam_gateway_client_register_device(&gateway_config, device_json);
+-    if (err != ESP_OK) {
+-        ESP_LOGW(TAG, "gateway device registration failed; SD event remains source of truth: %s", esp_err_to_name(err));
++    /*
++     * SD artifacts above are already persisted. The gateway upload is an
++     * optional best-effort step that requires Wi-Fi; SD remains the source
++     * of truth whether or not the network succeeds.
++     */
++    if (!ensure_network_for_upload()) {
++        ESP_LOGI(TAG, "no Wi-Fi connection; gateway upload skipped, SD event remains source of truth");
+     } else {
+-        err = clawcam_gateway_client_upload_event(&gateway_config, event_json);
++        clawcam_gateway_client_config_t gateway_config;
++        ESP_ERROR_CHECK(clawcam_gateway_client_default_config(&gateway_config));
++        const char *device_json = "{\"device_id\":\"esp32-s3-eye-v2.2-bench-node\",\"device_type\":\"node\",\"name\":\"ESP32-S3-EYE Bench Node\",\"hardware\":{\"board\":\"esp32-s3-eye-v2.2\",\"mcu\":\"esp32-s3\",\"camera\":\"ov2640\",\"storage\":\"sd/fatfs\"},\"firmware\":{\"name\":\"clawcam-node-espidf\",\"version\":\"0.1.0\",\"source\":\"bench-firmware\"},\"deployment_id\":\"hardware-bench\",\"capabilities\":[\"camera\",\"sd_fatfs\",\"event_artifact\",\"gateway_upload\"],\"status\":\"active\",\"created_at\":\"1970-01-01T00:00:00Z\",\"last_seen_at\":\"1970-01-01T00:00:00Z\",\"metadata\":{\"firmware_generated\":true}}";
++        err = clawcam_gateway_client_register_device(&gateway_config, device_json);
+         if (err != ESP_OK) {
+-            ESP_LOGW(TAG, "gateway event upload failed; SD event remains source of truth: %s", esp_err_to_name(err));
++            ESP_LOGW(TAG, "gateway device registration failed; SD event remains source of truth: %s", esp_err_to_name(err));
++        } else {
++            err = clawcam_gateway_client_upload_event(&gateway_config, event_json);
++            if (err != ESP_OK) {
++                ESP_LOGW(TAG, "gateway event upload failed; SD event remains source of truth: %s", esp_err_to_name(err));
++            }
+         }
+     }
+ #else
+@@ -223,6 +275,15 @@ void app_main(void)
+                      motion_event.trigger_source);
+         }
+ 
++        clawcam_wifi_status_t wifi_health;
++        if (clawcam_wifi_get_status(&wifi_health) == ESP_OK) {
++            ESP_LOGI(TAG, "wifi health: status=%s connected=%s rssi=%d retries=%u",
++                     wifi_health.status,
++                     wifi_health.connected ? "true" : "false",
++                     wifi_health.rssi,
++                     (unsigned)wifi_health.retry_count);
++        }
++
+         ESP_LOGI(TAG, "Next firmware port: PIR interrupt, battery ADC, deep sleep, gateway event queue");
+         vTaskDelay(pdMS_TO_TICKS(30000));
+     }
+diff --git a/firmware/clawcam_node_espidf/sdkconfig.defaults.esp32s3_eye b/firmware/clawcam_node_espidf/sdkconfig.defaults.esp32s3_eye
+index 6ccb0d9..7f6b7a0 100644
+--- a/firmware/clawcam_node_espidf/sdkconfig.defaults.esp32s3_eye
++++ b/firmware/clawcam_node_espidf/sdkconfig.defaults.esp32s3_eye
+@@ -24,3 +24,10 @@ CONFIG_CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE=y
+ CONFIG_CLAWCAM_STORAGE_MAX_FILES=5
+ # Keep formatting disabled by default to avoid destructive bench/field behavior.
+ # CONFIG_CLAWCAM_STORAGE_FORMAT_IF_MOUNT_FAILED is not set
++# Wi-Fi defaults to disabled. SD-card artifacts remain the offline source of truth.
++# Enable CONFIG_CLAWCAM_WIFI_ENABLED and supply SSID/password at the bench
++# when validating the optional gateway upload path. Recommended bench defaults
++# when enabling:
++#   CONFIG_CLAWCAM_WIFI_CONNECT_TIMEOUT_MS=10000
++#   CONFIG_CLAWCAM_WIFI_MAX_RETRIES=3
++# CONFIG_CLAWCAM_WIFI_ENABLED is not set
+diff --git a/tests/firmware/test_firmware_migration_scaffold.py b/tests/firmware/test_firmware_migration_scaffold.py
+index 33b9221..c57334c 100644
+--- a/tests/firmware/test_firmware_migration_scaffold.py
++++ b/tests/firmware/test_firmware_migration_scaffold.py
+@@ -157,6 +157,109 @@ def test_gateway_client_component_exposes_optional_http_upload_path() -> None:
+     assert "clawcam_gateway_client" in main_cmake
+ 
+ 
++def test_wifi_manager_component_exposes_offline_first_api() -> None:
++    wifi_header = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_wifi_manager/include/clawcam_wifi_manager.h").read_text(encoding="utf-8")
++    wifi_source = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_wifi_manager/clawcam_wifi_manager.c").read_text(encoding="utf-8")
++    wifi_kconfig = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_wifi_manager/Kconfig").read_text(encoding="utf-8")
++    wifi_cmake = (ROOT / "firmware/clawcam_node_espidf/components/clawcam_wifi_manager/CMakeLists.txt").read_text(encoding="utf-8")
++
++    for symbol in [
++        "clawcam_wifi_config_t",
++        "clawcam_wifi_status_t",
++        "CLAWCAM_WIFI_MODE_DISABLED",
++        "CLAWCAM_WIFI_MODE_STA",
++        "CLAWCAM_WIFI_MODE_PROVISIONING",
++        "clawcam_wifi_default_config",
++        "clawcam_wifi_init",
++        "clawcam_wifi_connect",
++        "clawcam_wifi_is_connected",
++        "clawcam_wifi_get_status",
++        "clawcam_wifi_disconnect",
++        "clawcam_wifi_deinit",
++        "last_connect_duration_ms",
++    ]:
++        assert symbol in wifi_header, f"missing {symbol} in clawcam_wifi_manager.h"
++
++    assert "CONFIG_CLAWCAM_WIFI_ENABLED" in wifi_source
++    assert "CONFIG_CLAWCAM_WIFI_PROVISIONING_MODE" in wifi_source
++    assert "esp_wifi_init" in wifi_source
++    assert "esp_wifi_connect" in wifi_source
++    assert "WIFI_EVENT_STA_DISCONNECTED" in wifi_source
++    assert "IP_EVENT_STA_GOT_IP" in wifi_source
++    assert "ESP_ERR_TIMEOUT" in wifi_source
++    assert "ESP_ERR_NOT_SUPPORTED" in wifi_source
++    # The manager must not depend on SD-card persistence and must declare
++    # offline-first behavior in its log messages.
++
