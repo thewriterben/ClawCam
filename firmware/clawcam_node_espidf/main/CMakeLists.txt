@@ -10,6 +10,7 @@ idf_component_register(
         clawcam_gateway_client
         clawcam_motion
         clawcam_mqtt
+        clawcam_ota
         clawcam_power
         clawcam_storage
 )

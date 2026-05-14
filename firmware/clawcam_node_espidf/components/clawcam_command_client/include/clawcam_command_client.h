@@ -26,11 +26,22 @@ extern "C" {
  * The implementation in main.c runs run_capture_cycle("command"). */
 typedef void (*clawcam_command_capture_cb_t)(const char *command_id, const char *reason);
 
+/* Callback invoked when the gateway queues a firmware_update command.
+ * Receives the full gateway base URL, the download path, and SHA256 hex string.
+ * The implementation in main.c delegates to clawcam_ota_update().
+ * Return ESP_OK on success; any other value causes the command to ack as "failed". */
+typedef esp_err_t (*clawcam_command_ota_cb_t)(
+    const char *base_url,
+    const char *firmware_path,
+    const char *sha256,
+    const char *version);
+
 typedef struct {
     const clawcam_gateway_client_config_t *gateway_config;
     const char *device_id;
     clawcam_config_t *node_config;          /* updated in-place by apply_config_patch */
     clawcam_command_capture_cb_t capture_cb; /* called for capture_now commands */
+    clawcam_command_ota_cb_t ota_cb;        /* called for firmware_update commands; may be NULL */
     int max_commands_per_wake;              /* safety limit; 0 = use default (5) */
 } clawcam_command_client_config_t;
 

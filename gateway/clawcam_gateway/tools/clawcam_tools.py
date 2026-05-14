@@ -108,6 +108,7 @@ def list_capabilities(context: ToolContext, device_id: str) -> dict[str, Any]:
         "has_storage": "cap_clawcam_storage" in caps,
         "has_sensors": "cap_clawcam_sensors" in caps,
         "has_events": "cap_clawcam_events" in caps,
+        "has_firmware_ota": "cap_clawcam_firmware_ota" in caps,
     }
 
 
@@ -226,6 +227,73 @@ def list_pending_commands(
         "status_filter": status,
         "count": len(commands),
         "commands": commands,
+    }
+
+
+def list_firmware_builds(context: ToolContext) -> dict[str, Any]:
+    """List all firmware builds uploaded to the gateway."""
+    builds = context.db.list_firmware_builds()
+    return {"ok": True, "count": len(builds), "builds": builds}
+
+
+def queue_firmware_update(
+    context: ToolContext,
+    device_id: str,
+    build_id: str,
+    approval_id: str | None = None,
+) -> dict[str, Any]:
+    """Queue an OTA firmware update command for a ClawCam node.
+
+    Requires cap_clawcam_firmware_ota capability. The gateway serves the binary
+    at a stable download URL embedded in the command payload. The node verifies
+    SHA256 before flashing. Approval-gated.
+    """
+    db = context.db
+    device = db.get_device(device_id)
+    if device is None:
+        return {"ok": False, "error": f"unknown device: {device_id}", "device_id": device_id}
+
+    caps = device.get("capabilities", [])
+    if caps and "cap_clawcam_firmware_ota" not in caps:
+        return {
+            "ok": False,
+            "error": f"device {device_id} does not declare cap_clawcam_firmware_ota",
+            "device_id": device_id,
+            "capabilities": caps,
+        }
+
+    build = db.get_firmware_build(build_id)
+    if build is None:
+        return {"ok": False, "error": f"unknown build_id: {build_id}", "build_id": build_id}
+
+    command_id = f"cmd-ota-{uuid.uuid4().hex[:12]}"
+    command = {
+        "command_id": command_id,
+        "command_type": "firmware_update",
+        "device_id": device_id,
+        "status": "queued",
+        "build_id": build_id,
+        "version": build["version"],
+        "firmware_url": f"/api/v1/firmware/{build_id}/download",
+        "sha256": build["sha256"],
+        "size_bytes": build["size_bytes"],
+        "approval_id": approval_id,
+        "queued_at": datetime.now(timezone.utc).isoformat(),
+    }
+    db.add_pending_command(command)
+    mqtt_pushed = context.publish_command(device_id, command)
+
+    return {
+        "ok": True,
+        "queued": True,
+        "command_id": command_id,
+        "device_id": device_id,
+        "build_id": build_id,
+        "version": build["version"],
+        "sha256": build["sha256"],
+        "status": "queued",
+        "mqtt_pushed": mqtt_pushed,
+        "message": f"Firmware update to {build['version']} queued. Node will apply on next wake cycle.",
     }
 
 

@@ -98,6 +98,11 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "list_firmware_builds",
+        "description": "List all firmware binaries uploaded to the gateway, with build_id, version, SHA256, and download URL.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "capture_now",
         "description": "Request a manual capture from a reachable ClawCam node. Approval-gated; requires cap_clawcam_camera_trap.",
         "inputSchema": {
@@ -115,6 +120,19 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "properties": {
                 "device_id": {"type": "string"},
                 "patch": {"type": "object"},
+                "approval_id": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "queue_firmware_update",
+        "description": "Queue an OTA firmware update for a ClawCam node. Approval-gated; requires cap_clawcam_firmware_ota. Node downloads and verifies SHA256 before flashing.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["device_id", "build_id"],
+            "properties": {
+                "device_id": {"type": "string"},
+                "build_id": {"type": "string", "description": "Build ID from list_firmware_builds."},
                 "approval_id": {"type": "string"},
             },
         },

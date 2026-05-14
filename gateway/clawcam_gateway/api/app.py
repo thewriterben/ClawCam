@@ -8,8 +8,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import hashlib
+import uuid as _uuid
+
 from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
 from clawcam_gateway.api.dashboard import render_dashboard
@@ -212,6 +215,72 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         )
         return {"ok": True, "results": results, "count": len(results)}
 
+    # ── Firmware OTA (Phase 3C) ───────────────────────────────────────────
+
+    @app.post("/api/v1/firmware")
+    async def upload_firmware(file: UploadFile) -> dict[str, Any]:
+        """Upload a firmware .bin image. Returns build_id, sha256, and download URL.
+
+        The node uses the download URL in the firmware_update command payload.
+        Firmware binaries are served back at GET /api/v1/firmware/{build_id}/download.
+        """
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="empty firmware file")
+
+        sha256 = hashlib.sha256(content).hexdigest()
+        build_id = _uuid.uuid4().hex[:16]
+        original_name = file.filename or "firmware.bin"
+        safe_name = f"{build_id}_{original_name}"
+
+        fw_dir = config.media_dir / "firmware"
+        fw_dir.mkdir(parents=True, exist_ok=True)
+        dest = fw_dir / safe_name
+        dest.write_bytes(content)
+
+        # Extract version from filename if present (e.g. "clawcam-node-0.2.0.bin")
+        stem = Path(original_name).stem
+        version = stem.split("-")[-1] if "-" in stem else stem
+
+        db.add_firmware_build(build_id, version, safe_name, sha256, len(content))
+        return {
+            "ok": True,
+            "build_id": build_id,
+            "version": version,
+            "sha256": sha256,
+            "size_bytes": len(content),
+            "download_url": f"/api/v1/firmware/{build_id}/download",
+        }
+
+    @app.get("/api/v1/firmware")
+    def list_firmware() -> dict[str, Any]:
+        """List all uploaded firmware builds."""
+        builds = db.list_firmware_builds()
+        return {"ok": True, "builds": builds, "count": len(builds)}
+
+    @app.get("/api/v1/firmware/{build_id}")
+    def get_firmware_build(build_id: str) -> dict[str, Any]:
+        """Return metadata for a specific firmware build."""
+        build = db.get_firmware_build(build_id)
+        if build is None:
+            raise HTTPException(status_code=404, detail=f"unknown build_id: {build_id}")
+        return {"ok": True, "build": build}
+
+    @app.get("/api/v1/firmware/{build_id}/download")
+    def download_firmware(build_id: str) -> FileResponse:
+        """Serve the raw firmware binary for a node OTA download."""
+        build = db.get_firmware_build(build_id)
+        if build is None:
+            raise HTTPException(status_code=404, detail=f"unknown build_id: {build_id}")
+        fw_path = config.media_dir / "firmware" / build["filename"]
+        if not fw_path.exists():
+            raise HTTPException(status_code=404, detail="firmware file not found on disk")
+        return FileResponse(
+            path=str(fw_path),
+            media_type="application/octet-stream",
+            filename=build["filename"],
+        )
+
     # ── Tools ─────────────────────────────────────────────────────────────
 
     @app.get("/api/v1/tools")
@@ -225,8 +294,10 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
                 {"name": "list_capabilities", "approval_required": False},
                 {"name": "get_inference_results", "approval_required": False},
                 {"name": "list_species_detections", "approval_required": False},
+                {"name": "list_firmware_builds", "approval_required": False},
                 {"name": "capture_now", "approval_required": True},
                 {"name": "apply_config_patch", "approval_required": True},
+                {"name": "queue_firmware_update", "approval_required": True},
             ]
         }
 

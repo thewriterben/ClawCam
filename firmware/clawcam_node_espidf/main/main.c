@@ -32,6 +32,7 @@
 #include "clawcam_gateway_client.h"
 #include "clawcam_motion.h"
 #include "clawcam_mqtt.h"
+#include "clawcam_ota.h"
 #include "clawcam_power.h"
 #include "clawcam_storage.h"
 
@@ -342,12 +343,22 @@ static void enter_field_sleep(uint64_t sleep_seconds)
     /* never reached */
 }
 
-/* ── Command client callback ────────────────────────────────────────────── */
+/* ── Command client callbacks ───────────────────────────────────────────── */
 
 static void on_command_capture(const char *command_id, const char *reason)
 {
     ESP_LOGI(TAG, "executing gateway capture command: id=%s reason=%s", command_id, reason);
     run_capture_cycle(reason[0] != '\0' ? reason : "command");
+}
+
+static esp_err_t on_command_ota(
+    const char *base_url,
+    const char *firmware_path,
+    const char *sha256,
+    const char *version)
+{
+    ESP_LOGI(TAG, "executing OTA command: version=%s", version ? version : "?");
+    return clawcam_ota_update(base_url, firmware_path, sha256, version);
 }
 
 /* ── Entry point ────────────────────────────────────────────────────────── */
@@ -419,6 +430,7 @@ void app_main(void)
             .device_id            = CLAWCAM_DEVICE_ID,
             .node_config          = &g_config,
             .capture_cb           = on_command_capture,
+            .ota_cb               = on_command_ota,
             .max_commands_per_wake = 5,
         };
         int handled = clawcam_command_client_poll(&cmd_cfg);

@@ -9,8 +9,10 @@ from clawcam_gateway.tools.clawcam_tools import (
     get_node_health,
     get_recent_detections,
     list_capabilities,
+    list_firmware_builds,
     list_pending_commands,
     list_species_detections,
+    queue_firmware_update,
 )
 
 __all__ = [
@@ -22,6 +24,8 @@ __all__ = [
     "get_node_health",
     "get_recent_detections",
     "list_capabilities",
+    "list_firmware_builds",
     "list_pending_commands",
     "list_species_detections",
+    "queue_firmware_update",
 ]

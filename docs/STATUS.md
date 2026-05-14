@@ -2,7 +2,7 @@
 
 This document is the source of truth for current implementation maturity. ClawCam tracks progress for **working code**, **scaffolds**, **frameworks**, and **planned features**.
 
-## Current Repository State (Phase 3B Complete)
+## Current Repository State (Phase 3C Complete)
 
 | Area                            | Status             | Notes                                                                                         |
 |---------------------------------|--------------------|-----------------------------------------------------------------------------------------------|
@@ -16,7 +16,7 @@ This document is the source of truth for current implementation maturity. ClawCa
 | Gateway capabilities endpoint   | ✅ **Working**      | GET /api/v1/devices/{device_id}/capabilities; flags for each capability group.                |
 | ESP-Claw capability groups      | ✅ **Working**      | Header-only firmware macros; CLAWCAM_ESP32_S3_EYE_CAPABILITIES in device registration JSON. |
 | Firmware NVS config             | ✅ **Working**      | clawcam_config: load/save/reset/patch; JSON patch via apply_config_patch command.            |
-| Firmware command client         | ✅ **Working**      | clawcam_command_client: polls gateway, dispatches capture_now/apply_config_patch, acks.       |
+| Firmware command client         | ✅ **Working**      | clawcam_command_client: polls gateway, dispatches capture_now/apply_config_patch/OTA, acks.  |
 | Firmware capture loop           | ✅ **Working**      | Deterministic PIR → capture → command poll → deep sleep; config-driven sleep intervals.      |
 | Firmware deep sleep             | ✅ **Working**      | EXT0 PIR wake + timer fallback; battery-aware extended sleep from NVS config.                |
 | Brain adapter                   | ✅ **Working**      | ClawCamAdapter: subprocess stdio, tool discovery, approval policy, OBC registration.         |
@@ -29,8 +29,9 @@ This document is the source of truth for current implementation maturity. ClawCa
 | MQTT firmware component         | ✅ **Working**      | clawcam_mqtt: publishes events, receives commands via MQTT; falls back to HTTP.              |
 | MQTT command push               | ✅ **Working**      | capture_now/apply_config_patch push immediately to node MQTT topic on queue.                 |
 | Phase 3B MQTT tests             | ✅ **Working**      | Topic naming, event/health/ack routing, command publish, ToolContext integration.            |
+| OTA firmware update             | ✅ **Working**      | Phase 3C; gateway serves .bin; queue_firmware_update tool; clawcam_ota component.           |
+| Phase 3C OTA tests              | ✅ **Working**      | Firmware upload/list/download REST, DB CRUD, tool functions, dispatch, adapter policy.       |
 | Cloud backend                   | 🔲 **Planned**      | Deferred until local system achieves MVP with real hardware.                                  |
-| OTA firmware update             | 🔲 **Planned**      | Phase 3C; update command via gateway queue + ESP-IDF OTA API.                                 |
 
 Ground Rules:
 - No feature will be described as "Working" until verified with tests and reproducible steps.
@@ -83,9 +84,31 @@ Phase 3B adds a real-time command channel between the gateway and nodes:
 4. **FastAPI lifespan** starts/stops the bridge thread automatically; disabled by default
    so the gateway runs without a broker in offline/dev mode.
 
-## Next Milestone (Phase 3C): OTA & Cloud
+## Phase 3C Complete — OTA Firmware Update
 
-- OTA firmware update: gateway queues firmware update command; node downloads via ESP-IDF OTA
-- Cloud storage backend for off-site media archival
+Phase 3C closes the firmware update loop, enabling the brain to push new firmware to nodes without physical access:
+
+1. **Firmware upload** (`POST /api/v1/firmware`): accepts `.bin` files, computes SHA256, assigns a `build_id`,
+   stores in `firmware_builds` SQLite table. Serves binaries at stable download URLs.
+2. **`queue_firmware_update` MCP tool** (approval-gated): validates device exists and declares
+   `cap_clawcam_firmware_ota`, validates `build_id`, queues a `firmware_update` command with
+   `firmware_url`, `sha256`, `version`, and `size_bytes`. Publishes via MQTT if connected.
+3. **`list_firmware_builds` MCP tool** (auto-approved): returns all uploaded builds with
+   build_id, version, SHA256, and download URL for brain discovery.
+4. **`cap_clawcam_firmware_ota`** capability string added to `clawcam_capabilities.h` and
+   included in `CLAWCAM_ESP32_S3_EYE_CAPABILITIES` macro — nodes declare OTA readiness in
+   device registration JSON.
+5. **`clawcam_ota` firmware component**: downloads binary via `esp_http_client` streaming,
+   verifies SHA256 via mbedTLS, writes to OTA partition via `esp_ota_ops`, sets boot partition,
+   and reboots. Stub mode logs without flashing (same gate as gateway client).
+6. **Command client OTA dispatch**: `clawcam_command_client` now handles `firmware_update`
+   command type; calls `ota_cb` from the config struct; acks "executed" on success, "failed"
+   with error string on failure.
+7. **Brain adapter policy**: `list_firmware_builds` is auto-approved; `queue_firmware_update`
+   is in `always_ask` — the brain must obtain explicit user confirmation before queuing.
+
+## Next Milestone: Cloud Backend
+
+- Cloud storage backend for off-site media archival (S3/GCS sync)
 
 ---
