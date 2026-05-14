@@ -218,6 +218,65 @@ def list_pending_commands(
     }
 
 
+def get_inference_results(context: ToolContext, event_id: str) -> dict[str, Any]:
+    """Return species detection results for a specific captured event.
+
+    Inference runs automatically after a node uploads media via the gateway.
+    Returns the top detection label, confidence, and full bounding-box list.
+    """
+    result = context.db.get_inference_result(event_id)
+    if result is None:
+        return {
+            "ok": False,
+            "error": f"no inference result found for event {event_id}",
+            "event_id": event_id,
+        }
+    return {"ok": True, "event_id": event_id, "result": result}
+
+
+def list_species_detections(
+    context: ToolContext,
+    limit: int = 25,
+    label: str | None = None,
+    min_confidence: float = 0.5,
+    species: str | None = None,
+) -> dict[str, Any]:
+    """List recent inference results with optional species/label filtering.
+
+    Useful for asking questions like:
+      - "What animals have been detected in the last 24 hours?"
+      - "Show me all deer detections with confidence above 0.8"
+      - "How many person detections occurred this week?"
+
+    Arguments
+    ---------
+    limit:          Maximum results to return (1–100, default 25).
+    label:          Filter by detection label: "animal", "person", "vehicle".
+    min_confidence: Minimum top_confidence score (default 0.5).
+    species:        Substring match on species name (e.g. "deer").
+    """
+    safe_limit = max(1, min(int(limit), 100))
+    results = context.db.list_inference_results(
+        limit=safe_limit,
+        label=label,
+        min_confidence=float(min_confidence),
+        species=species,
+    )
+    label_counts: Counter[str] = Counter(
+        r["top_label"] for r in results if r["top_label"]
+    )
+    species_counts: Counter[str] = Counter(
+        r["top_species"] for r in results if r["top_species"]
+    )
+    return {
+        "ok": True,
+        "count": len(results),
+        "label_counts": dict(label_counts),
+        "species_counts": dict(species_counts),
+        "results": results,
+    }
+
+
 def _validate_config_patch(patch: dict[str, Any]) -> None:
     """Reject patches that reference protected keys."""
 

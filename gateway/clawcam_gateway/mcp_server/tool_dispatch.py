@@ -14,10 +14,12 @@ from clawcam_gateway.tools import (
     apply_config_patch,
     capture_now,
     generate_daily_summary,
+    get_inference_results,
     get_node_health,
     get_recent_detections,
     list_capabilities,
     list_pending_commands,
+    list_species_detections,
 )
 
 
@@ -38,6 +40,8 @@ def dispatch_tool(name: str, arguments: dict[str, Any] | None = None, database_p
         "generate_daily_summary": lambda **kw: generate_daily_summary(context, **kw),
         "list_pending_commands": lambda **kw: list_pending_commands(context, **kw),
         "list_capabilities": lambda **kw: list_capabilities(context, **kw),
+        "get_inference_results": lambda **kw: get_inference_results(context, **kw),
+        "list_species_detections": lambda **kw: list_species_detections(context, **kw),
         "capture_now": lambda **kw: capture_now(context, **kw),
         "apply_config_patch": lambda **kw: apply_config_patch(context, **kw),
     }

@@ -44,6 +44,8 @@ class ToolPolicy:
         "generate_daily_summary",
         "list_pending_commands",
         "list_capabilities",
+        "get_inference_results",
+        "list_species_detections",
     }))
     always_ask: frozenset[str] = field(default_factory=lambda: frozenset({
         "capture_now",
