@@ -85,22 +85,45 @@ def generate_daily_summary(
     }
 
 
+def list_capabilities(context: ToolContext, device_id: str) -> dict[str, Any]:
+    """Return the ESP-Claw capability groups declared by a node."""
+
+    device = context.db.get_device(device_id)
+    if device is None:
+        return {"ok": False, "error": f"unknown device: {device_id}", "device_id": device_id}
+    caps = device.get("capabilities", [])
+    return {
+        "ok": True,
+        "device_id": device_id,
+        "capabilities": caps,
+        "has_camera_trap": "cap_clawcam_camera_trap" in caps,
+        "has_power": "cap_clawcam_power" in caps,
+        "has_storage": "cap_clawcam_storage" in caps,
+        "has_sensors": "cap_clawcam_sensors" in caps,
+        "has_events": "cap_clawcam_events" in caps,
+    }
+
+
 def capture_now(context: ToolContext, device_id: str, reason: str | None = None) -> dict[str, Any]:
     """Queue a manual capture command for a ClawCam node.
 
-    The gateway stores this as a pending command. The field node polls
-    /api/v1/commands/{device_id}/pending and executes the capture on its next
-    wake cycle (Phase 2 node command transport). The brain enforces human
-    approval before calling this tool.
+    The node polls GET /api/v1/commands/{device_id}/pending on each wake cycle
+    and executes queued commands. Requires cap_clawcam_camera_trap capability.
+    The brain enforces human approval before calling this tool.
     """
 
     db = context.db
     device = db.get_device(device_id)
     if device is None:
+        return {"ok": False, "error": f"unknown device: {device_id}", "device_id": device_id}
+
+    caps = device.get("capabilities", [])
+    if caps and "cap_clawcam_camera_trap" not in caps:
         return {
             "ok": False,
-            "error": f"unknown device: {device_id}",
+            "error": f"device {device_id} does not declare cap_clawcam_camera_trap",
             "device_id": device_id,
+            "capabilities": caps,
         }
 
     command_id = f"cmd-capture-{uuid.uuid4().hex[:12]}"
@@ -120,10 +143,7 @@ def capture_now(context: ToolContext, device_id: str, reason: str | None = None)
         "command_id": command_id,
         "device_id": device_id,
         "status": "queued",
-        "message": (
-            "Capture command queued. The node will execute it on its next wake cycle "
-            "when Phase 2 node command polling is active."
-        ),
+        "message": "Capture command queued. The node will execute it on its next wake cycle.",
     }
 
 
@@ -177,10 +197,7 @@ def apply_config_patch(
         "status": "queued",
         "patch_keys": list(patch.keys()),
         "approval_id": approval_id,
-        "message": (
-            "Config patch queued. The node will apply it on its next wake cycle "
-            "when Phase 2 node command polling is active."
-        ),
+        "message": "Config patch queued. The node will apply it on its next wake cycle.",
     }
 
 

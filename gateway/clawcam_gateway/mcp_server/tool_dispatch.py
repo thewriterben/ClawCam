@@ -16,6 +16,7 @@ from clawcam_gateway.tools import (
     generate_daily_summary,
     get_node_health,
     get_recent_detections,
+    list_capabilities,
     list_pending_commands,
 )
 
@@ -36,6 +37,7 @@ def dispatch_tool(name: str, arguments: dict[str, Any] | None = None, database_p
         "get_node_health": lambda **kw: get_node_health(context, **kw),
         "generate_daily_summary": lambda **kw: generate_daily_summary(context, **kw),
         "list_pending_commands": lambda **kw: list_pending_commands(context, **kw),
+        "list_capabilities": lambda **kw: list_capabilities(context, **kw),
         "capture_now": lambda **kw: capture_now(context, **kw),
         "apply_config_patch": lambda **kw: apply_config_patch(context, **kw),
     }
