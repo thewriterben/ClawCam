@@ -31,6 +31,9 @@
 /* Publish wildlife events, health events, and maintenance events */
 #define CLAWCAM_CAP_EVENTS        "cap_clawcam_events"
 
+/* OTA firmware update via gateway command + ESP-IDF esp_ota_ops */
+#define CLAWCAM_CAP_FIRMWARE_OTA  "cap_clawcam_firmware_ota"
+
 /*
  * Capability set string for the ESP32-S3-EYE reference board.
  * Use this as the "capabilities" array value in device registration JSON.
@@ -39,4 +42,5 @@
     "\"" CLAWCAM_CAP_CAMERA_TRAP "\"," \
     "\"" CLAWCAM_CAP_POWER "\"," \
     "\"" CLAWCAM_CAP_STORAGE "\"," \
-    "\"" CLAWCAM_CAP_EVENTS "\""
+    "\"" CLAWCAM_CAP_EVENTS "\"," \
+    "\"" CLAWCAM_CAP_FIRMWARE_OTA "\""

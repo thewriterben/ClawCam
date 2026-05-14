@@ -124,6 +124,15 @@ class GatewayDatabase:
                 CREATE INDEX IF NOT EXISTS idx_inference_event_id ON inference_results(event_id);
                 CREATE INDEX IF NOT EXISTS idx_inference_top_label ON inference_results(top_label);
                 CREATE INDEX IF NOT EXISTS idx_inference_ran_at ON inference_results(ran_at);
+
+                CREATE TABLE IF NOT EXISTS firmware_builds (
+                    build_id TEXT PRIMARY KEY,
+                    version TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
                 """
             )
 
@@ -397,6 +406,32 @@ class GatewayDatabase:
             }
             for row in rows
         ]
+
+    def add_firmware_build(
+        self, build_id: str, version: str, filename: str, sha256: str, size_bytes: int
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO firmware_builds (build_id, version, filename, sha256, size_bytes)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (build_id, version, filename, sha256, size_bytes),
+            )
+
+    def get_firmware_build(self, build_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM firmware_builds WHERE build_id = ?", (build_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_firmware_builds(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM firmware_builds ORDER BY uploaded_at DESC"
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def latest_health(self, device_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:

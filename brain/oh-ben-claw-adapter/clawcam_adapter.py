@@ -46,10 +46,12 @@ class ToolPolicy:
         "list_capabilities",
         "get_inference_results",
         "list_species_detections",
+        "list_firmware_builds",
     }))
     always_ask: frozenset[str] = field(default_factory=lambda: frozenset({
         "capture_now",
         "apply_config_patch",
+        "queue_firmware_update",
     }))
 
     def requires_approval(self, tool_name: str) -> bool:

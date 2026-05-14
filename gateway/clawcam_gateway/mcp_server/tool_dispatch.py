@@ -18,8 +18,10 @@ from clawcam_gateway.tools import (
     get_node_health,
     get_recent_detections,
     list_capabilities,
+    list_firmware_builds,
     list_pending_commands,
     list_species_detections,
+    queue_firmware_update,
 )
 
 
@@ -42,8 +44,10 @@ def dispatch_tool(name: str, arguments: dict[str, Any] | None = None, database_p
         "list_capabilities": lambda **kw: list_capabilities(context, **kw),
         "get_inference_results": lambda **kw: get_inference_results(context, **kw),
         "list_species_detections": lambda **kw: list_species_detections(context, **kw),
+        "list_firmware_builds": lambda **kw: list_firmware_builds(context, **kw),
         "capture_now": lambda **kw: capture_now(context, **kw),
         "apply_config_patch": lambda **kw: apply_config_patch(context, **kw),
+        "queue_firmware_update": lambda **kw: queue_firmware_update(context, **kw),
     }
     if name not in dispatch:
         return {"ok": False, "error": f"unknown ClawCam tool: {name}", "tool": name}

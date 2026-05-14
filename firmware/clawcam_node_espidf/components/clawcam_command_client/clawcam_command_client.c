@@ -194,6 +194,40 @@ static void handle_apply_config_patch(const clawcam_command_client_config_t *cfg
     }
 }
 
+static void handle_firmware_update(const clawcam_command_client_config_t *cfg,
+                                    const char *command_id,
+                                    const char *command_json)
+{
+    char firmware_url[256];
+    char sha256[65];
+    char version[32];
+    json_extract_str(command_json, "firmware_url", firmware_url, sizeof(firmware_url));
+    json_extract_str(command_json, "sha256",       sha256,       sizeof(sha256));
+    json_extract_str(command_json, "version",      version,      sizeof(version));
+
+    if (firmware_url[0] == '\0') {
+        ESP_LOGW(TAG, "firmware_update missing 'firmware_url'; skipping");
+        send_ack(cfg, command_id, "failed", "missing firmware_url");
+        return;
+    }
+
+    ESP_LOGI(TAG, "firmware_update: version=%s url=%s sha256=%.16s...",
+             version, firmware_url, sha256);
+
+    if (cfg->ota_cb == NULL) {
+        ESP_LOGW(TAG, "no ota_cb registered; cannot execute firmware_update");
+        send_ack(cfg, command_id, "failed", "no OTA handler registered");
+        return;
+    }
+
+    esp_err_t err = cfg->ota_cb(cfg->gateway_config->base_url, firmware_url, sha256, version);
+    if (err == ESP_OK) {
+        send_ack(cfg, command_id, "executed", "OTA update applied; rebooting");
+    } else {
+        send_ack(cfg, command_id, "failed", esp_err_to_name(err));
+    }
+}
+
 /* ── Poll ───────────────────────────────────────────────────────────────── */
 
 int clawcam_command_client_poll(const clawcam_command_client_config_t *cfg)
@@ -278,6 +312,9 @@ int clawcam_command_client_poll(const clawcam_command_client_config_t *cfg)
             handled++;
         } else if (strcmp(command_type, "apply_config_patch") == 0) {
             handle_apply_config_patch(cfg, command_id, obj_buf);
+            handled++;
+        } else if (strcmp(command_type, "firmware_update") == 0) {
+            handle_firmware_update(cfg, command_id, obj_buf);
             handled++;
         } else {
             ESP_LOGW(TAG, "unknown command type '%s'; acking as skipped", command_type);
