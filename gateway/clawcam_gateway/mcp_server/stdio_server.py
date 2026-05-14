@@ -75,6 +75,29 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_inference_results",
+        "description": "Return species detection results for a specific captured event.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["event_id"],
+            "properties": {"event_id": {"type": "string"}},
+        },
+    },
+    {
+        "name": "list_species_detections",
+        "description": "List recent inference results with optional filtering by label, species, or confidence. Useful for 'what animals were detected?' queries.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25},
+                "label": {"type": "string", "enum": ["animal", "person", "vehicle"],
+                          "description": "Filter by detection category."},
+                "min_confidence": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5},
+                "species": {"type": "string", "description": "Substring match on species name."},
+            },
+        },
+    },
+    {
         "name": "capture_now",
         "description": "Request a manual capture from a reachable ClawCam node. Approval-gated; requires cap_clawcam_camera_trap.",
         "inputSchema": {

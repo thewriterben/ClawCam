@@ -106,6 +106,24 @@ class GatewayDatabase:
 
                 CREATE INDEX IF NOT EXISTS idx_pending_commands_device ON pending_commands(device_id);
                 CREATE INDEX IF NOT EXISTS idx_pending_commands_status ON pending_commands(status);
+
+                CREATE TABLE IF NOT EXISTS inference_results (
+                    result_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id TEXT NOT NULL,
+                    media_path TEXT NOT NULL,
+                    model_name TEXT NOT NULL,
+                    model_version TEXT NOT NULL,
+                    detections_json TEXT NOT NULL,
+                    top_label TEXT,
+                    top_confidence REAL,
+                    top_species TEXT,
+                    ran_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY(event_id) REFERENCES events(event_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_inference_event_id ON inference_results(event_id);
+                CREATE INDEX IF NOT EXISTS idx_inference_top_label ON inference_results(top_label);
+                CREATE INDEX IF NOT EXISTS idx_inference_ran_at ON inference_results(ran_at);
                 """
             )
 
@@ -283,6 +301,102 @@ class GatewayDatabase:
         if device is None:
             return []
         return device.get("capabilities", [])
+
+    def save_inference_result(self, event_id: str, media_path: str, result: Any) -> None:
+        """Persist an InferenceResult (duck-typed) for an event."""
+        d = result.to_dict()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO inference_results
+                    (event_id, media_path, model_name, model_version,
+                     detections_json, top_label, top_confidence, top_species)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    media_path,
+                    d["model_name"],
+                    d["model_version"],
+                    json.dumps(d["detections"], sort_keys=True),
+                    d.get("top_label"),
+                    d.get("top_confidence"),
+                    d.get("top_species"),
+                ),
+            )
+
+    def get_inference_result(self, event_id: str) -> dict[str, Any] | None:
+        """Return the most recent inference result for an event, or None."""
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT event_id, media_path, model_name, model_version,
+                       detections_json, top_label, top_confidence, top_species, ran_at
+                FROM inference_results
+                WHERE event_id = ?
+                ORDER BY ran_at DESC
+                LIMIT 1
+                """,
+                (event_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "event_id": row["event_id"],
+            "media_path": row["media_path"],
+            "model_name": row["model_name"],
+            "model_version": row["model_version"],
+            "detections": json.loads(row["detections_json"]),
+            "top_label": row["top_label"],
+            "top_confidence": row["top_confidence"],
+            "top_species": row["top_species"],
+            "ran_at": row["ran_at"],
+        }
+
+    def list_inference_results(
+        self,
+        limit: int = 25,
+        label: str | None = None,
+        min_confidence: float = 0.0,
+        species: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List recent inference results with optional filtering."""
+        clauses = ["top_confidence >= ?"]
+        params: list[Any] = [min_confidence]
+        if label:
+            clauses.append("top_label = ?")
+            params.append(label)
+        if species:
+            clauses.append("top_species LIKE ?")
+            params.append(f"%{species}%")
+        where = " AND ".join(clauses)
+        params.append(limit)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT event_id, media_path, model_name, model_version,
+                       detections_json, top_label, top_confidence, top_species, ran_at
+                FROM inference_results
+                WHERE {where}
+                ORDER BY ran_at DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [
+            {
+                "event_id": row["event_id"],
+                "media_path": row["media_path"],
+                "model_name": row["model_name"],
+                "model_version": row["model_version"],
+                "detections": json.loads(row["detections_json"]),
+                "top_label": row["top_label"],
+                "top_confidence": row["top_confidence"],
+                "top_species": row["top_species"],
+                "ran_at": row["ran_at"],
+            }
+            for row in rows
+        ]
 
     def latest_health(self, device_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:

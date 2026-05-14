@@ -16,23 +16,30 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from clawcam_gateway.storage.database import GatewayDatabase
 
 
-@dataclass(frozen=True)
+@dataclass
 class ToolContext:
     """Shared context for ClawCam gateway tool calls."""
 
     database_path: Path | str = "clawcam_gateway.db"
+    mqtt_bridge: Optional[Any] = field(default=None, repr=False)  # MQTTBridge | None
 
     @property
     def db(self) -> GatewayDatabase:
         return GatewayDatabase(self.database_path)
+
+    def publish_command(self, device_id: str, command: dict[str, Any]) -> bool:
+        """Push a queued command to the node via MQTT if bridge is active."""
+        if self.mqtt_bridge is not None:
+            return self.mqtt_bridge.publish_command(device_id, command)
+        return False
 
 
 def get_recent_detections(context: ToolContext, limit: int = 25) -> dict[str, Any]:
@@ -136,6 +143,7 @@ def capture_now(context: ToolContext, device_id: str, reason: str | None = None)
         "queued_at": datetime.now(timezone.utc).isoformat(),
     }
     db.add_pending_command(command)
+    mqtt_pushed = context.publish_command(device_id, command)
 
     return {
         "ok": True,
@@ -143,6 +151,7 @@ def capture_now(context: ToolContext, device_id: str, reason: str | None = None)
         "command_id": command_id,
         "device_id": device_id,
         "status": "queued",
+        "mqtt_pushed": mqtt_pushed,
         "message": "Capture command queued. The node will execute it on its next wake cycle.",
     }
 
@@ -188,6 +197,7 @@ def apply_config_patch(
         "queued_at": datetime.now(timezone.utc).isoformat(),
     }
     db.add_pending_command(command)
+    mqtt_pushed = context.publish_command(device_id, command)
 
     return {
         "ok": True,
@@ -197,6 +207,7 @@ def apply_config_patch(
         "status": "queued",
         "patch_keys": list(patch.keys()),
         "approval_id": approval_id,
+        "mqtt_pushed": mqtt_pushed,
         "message": "Config patch queued. The node will apply it on its next wake cycle.",
     }
 
@@ -215,6 +226,65 @@ def list_pending_commands(
         "status_filter": status,
         "count": len(commands),
         "commands": commands,
+    }
+
+
+def get_inference_results(context: ToolContext, event_id: str) -> dict[str, Any]:
+    """Return species detection results for a specific captured event.
+
+    Inference runs automatically after a node uploads media via the gateway.
+    Returns the top detection label, confidence, and full bounding-box list.
+    """
+    result = context.db.get_inference_result(event_id)
+    if result is None:
+        return {
+            "ok": False,
+            "error": f"no inference result found for event {event_id}",
+            "event_id": event_id,
+        }
+    return {"ok": True, "event_id": event_id, "result": result}
+
+
+def list_species_detections(
+    context: ToolContext,
+    limit: int = 25,
+    label: str | None = None,
+    min_confidence: float = 0.5,
+    species: str | None = None,
+) -> dict[str, Any]:
+    """List recent inference results with optional species/label filtering.
+
+    Useful for asking questions like:
+      - "What animals have been detected in the last 24 hours?"
+      - "Show me all deer detections with confidence above 0.8"
+      - "How many person detections occurred this week?"
+
+    Arguments
+    ---------
+    limit:          Maximum results to return (1–100, default 25).
+    label:          Filter by detection label: "animal", "person", "vehicle".
+    min_confidence: Minimum top_confidence score (default 0.5).
+    species:        Substring match on species name (e.g. "deer").
+    """
+    safe_limit = max(1, min(int(limit), 100))
+    results = context.db.list_inference_results(
+        limit=safe_limit,
+        label=label,
+        min_confidence=float(min_confidence),
+        species=species,
+    )
+    label_counts: Counter[str] = Counter(
+        r["top_label"] for r in results if r["top_label"]
+    )
+    species_counts: Counter[str] = Counter(
+        r["top_species"] for r in results if r["top_species"]
+    )
+    return {
+        "ok": True,
+        "count": len(results),
+        "label_counts": dict(label_counts),
+        "species_counts": dict(species_counts),
+        "results": results,
     }
 
 

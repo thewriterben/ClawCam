@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from clawcam_gateway.api.dashboard import render_dashboard
 from clawcam_gateway.config import GatewayConfig
+from clawcam_gateway.inference.pipeline import InferencePipeline
 from clawcam_gateway.ingest.validation import validate_device, validate_event, validate_health
 from clawcam_gateway.mcp_server.tool_dispatch import dispatch_tool
+from clawcam_gateway.mqtt_bridge.bridge import MQTTBridge
 from clawcam_gateway.storage.database import GatewayDatabase
 
 
@@ -39,11 +43,30 @@ class CommandAck(BaseModel):
 def create_app(config: GatewayConfig | None = None) -> FastAPI:
     config = config or GatewayConfig.from_env()
     db = GatewayDatabase(config.database_path)
+    pipeline = InferencePipeline(db=db, enabled=config.inference_enabled)
+    bridge = MQTTBridge(
+        db=db,
+        broker_host=config.mqtt_broker_host,
+        broker_port=config.mqtt_broker_port,
+        client_id=config.mqtt_client_id,
+        mqtt_root=config.mqtt_topic_root,
+        username=config.mqtt_username,
+        password=config.mqtt_password,
+    ) if config.mqtt_enabled else None
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if bridge is not None:
+            bridge.start()
+        yield
+        if bridge is not None:
+            bridge.stop()
 
     app = FastAPI(
         title="ClawCam Gateway",
         description="Offline-first field gateway for ClawCam wildlife monitoring deployments.",
         version="0.1.0",
+        lifespan=lifespan,
     )
 
     @app.get("/health")
@@ -135,6 +158,60 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"unknown device: {device_id}")
         return {"ok": True, "device_id": device_id, "capabilities": caps}
 
+    # ── Inference (Phase 3) ───────────────────────────────────────────────
+
+    @app.post("/api/v1/media/{event_id}")
+    async def upload_media(
+        event_id: str,
+        file: UploadFile,
+        background_tasks: BackgroundTasks,
+    ) -> dict[str, Any]:
+        """Accept a JPEG/PNG image from a node and trigger inference in the background.
+
+        The event must already exist (registered via POST /api/v1/events).
+        Inference runs asynchronously so this endpoint returns immediately.
+        """
+        if db.get_inference_result(event_id) is not None and \
+                db.get_inference_result(event_id).get("model_name") != "mock_detector":
+            # Already processed; accept the upload but skip re-inference
+            return {"ok": True, "event_id": event_id, "inference": "already_processed"}
+
+        # Save the uploaded file into the configured media directory
+        config.media_dir.mkdir(parents=True, exist_ok=True)
+        suffix = Path(file.filename or "image.jpg").suffix or ".jpg"
+        dest = config.media_dir / f"{event_id}{suffix}"
+        content = await file.read()
+        dest.write_bytes(content)
+
+        # Run inference in the background (non-blocking)
+        background_tasks.add_task(pipeline.run, event_id, str(dest))
+        return {"ok": True, "event_id": event_id, "media_path": str(dest), "inference": "queued"}
+
+    @app.get("/api/v1/events/{event_id}/inference")
+    def get_event_inference(event_id: str) -> dict[str, Any]:
+        """Return the inference result for a specific event."""
+        result = db.get_inference_result(event_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"no inference result for event {event_id}")
+        return {"ok": True, "result": result}
+
+    @app.get("/api/v1/inference/recent")
+    def recent_inference(
+        limit: int = 25,
+        label: str | None = None,
+        min_confidence: float = 0.0,
+        species: str | None = None,
+    ) -> dict[str, Any]:
+        """List recent inference results with optional filters."""
+        safe_limit = max(1, min(limit, 100))
+        results = db.list_inference_results(
+            limit=safe_limit,
+            label=label,
+            min_confidence=min_confidence,
+            species=species,
+        )
+        return {"ok": True, "results": results, "count": len(results)}
+
     # ── Tools ─────────────────────────────────────────────────────────────
 
     @app.get("/api/v1/tools")
@@ -146,6 +223,8 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
                 {"name": "generate_daily_summary", "approval_required": False},
                 {"name": "list_pending_commands", "approval_required": False},
                 {"name": "list_capabilities", "approval_required": False},
+                {"name": "get_inference_results", "approval_required": False},
+                {"name": "list_species_detections", "approval_required": False},
                 {"name": "capture_now", "approval_required": True},
                 {"name": "apply_config_patch", "approval_required": True},
             ]
@@ -153,7 +232,11 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
 
     @app.post("/api/v1/tools/{tool_name}")
     def call_tool(tool_name: str, request: ToolRequest) -> dict[str, Any]:
-        result = dispatch_tool(tool_name, request.arguments, database_path=config.database_path)
+        result = dispatch_tool(
+            tool_name, request.arguments,
+            database_path=config.database_path,
+            mqtt_bridge=bridge,
+        )
         if not result.get("ok", False) and result.get("error", "").startswith("unknown"):
             raise HTTPException(status_code=404, detail=result)
         return result
