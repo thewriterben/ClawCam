@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from clawcam_gateway.config import GatewayConfig
 from clawcam_gateway.inference.pipeline import InferencePipeline
 from clawcam_gateway.ingest.validation import validate_device, validate_event, validate_health
 from clawcam_gateway.mcp_server.tool_dispatch import dispatch_tool
+from clawcam_gateway.mqtt_bridge.bridge import MQTTBridge
 from clawcam_gateway.storage.database import GatewayDatabase
 
 
@@ -41,15 +43,30 @@ class CommandAck(BaseModel):
 def create_app(config: GatewayConfig | None = None) -> FastAPI:
     config = config or GatewayConfig.from_env()
     db = GatewayDatabase(config.database_path)
-    pipeline = InferencePipeline(
+    pipeline = InferencePipeline(db=db, enabled=config.inference_enabled)
+    bridge = MQTTBridge(
         db=db,
-        enabled=config.inference_enabled,
-    )
+        broker_host=config.mqtt_broker_host,
+        broker_port=config.mqtt_broker_port,
+        client_id=config.mqtt_client_id,
+        mqtt_root=config.mqtt_topic_root,
+        username=config.mqtt_username,
+        password=config.mqtt_password,
+    ) if config.mqtt_enabled else None
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if bridge is not None:
+            bridge.start()
+        yield
+        if bridge is not None:
+            bridge.stop()
 
     app = FastAPI(
         title="ClawCam Gateway",
         description="Offline-first field gateway for ClawCam wildlife monitoring deployments.",
         version="0.1.0",
+        lifespan=lifespan,
     )
 
     @app.get("/health")
@@ -215,7 +232,11 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
 
     @app.post("/api/v1/tools/{tool_name}")
     def call_tool(tool_name: str, request: ToolRequest) -> dict[str, Any]:
-        result = dispatch_tool(tool_name, request.arguments, database_path=config.database_path)
+        result = dispatch_tool(
+            tool_name, request.arguments,
+            database_path=config.database_path,
+            mqtt_bridge=bridge,
+        )
         if not result.get("ok", False) and result.get("error", "").startswith("unknown"):
             raise HTTPException(status_code=404, detail=result)
         return result

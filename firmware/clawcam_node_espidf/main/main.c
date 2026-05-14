@@ -6,8 +6,8 @@
  *   2. Init all components.
  *   3. Check wake reason (PIR EXT0, timer, or power-on).
  *   4. Skip capture on low battery; sleep longer.
- *   5. Run capture cycle: image → metadata → event JSON → SD persist → gateway upload.
- *   6. Poll gateway command queue and execute any pending commands.
+ *   5. Run capture cycle: image → metadata → event JSON → SD persist.
+ *   6. Upload event via MQTT (publish event + receive any commands) OR HTTP poll.
  *   7. Configure PIR + timer wake sources and enter deep sleep.
  *
  * On first power-on, the optional camera smoke test runs (Kconfig-gated) before
@@ -31,6 +31,7 @@
 #include "clawcam_events.h"
 #include "clawcam_gateway_client.h"
 #include "clawcam_motion.h"
+#include "clawcam_mqtt.h"
 #include "clawcam_power.h"
 #include "clawcam_storage.h"
 
@@ -208,35 +209,47 @@ static void persist_capture(
     }
 
 #if CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED
-    clawcam_gateway_client_config_t gateway_config;
-    ESP_ERROR_CHECK(clawcam_gateway_client_default_config(&gateway_config));
-    char device_json[768];
-    snprintf(device_json, sizeof(device_json),
-        "{\"device_id\":\"" CLAWCAM_DEVICE_ID "\","
-        "\"device_type\":\"node\","
-        "\"name\":\"ESP32-S3-EYE Field Node\","
-        "\"hardware\":{\"board\":\"esp32-s3-eye-v2.2\",\"mcu\":\"esp32-s3\",\"camera\":\"ov2640\",\"storage\":\"sd/fatfs\"},"
-        "\"firmware\":{\"name\":\"clawcam-node-espidf\",\"version\":\"0.1.0\",\"source\":\"field-firmware\"},"
-        "\"deployment_id\":\"%s\","
-        "\"capabilities\":[" CLAWCAM_ESP32_S3_EYE_CAPABILITIES "],"
-        "\"status\":\"active\","
-        "\"created_at\":\"1970-01-01T00:00:00Z\","
-        "\"last_seen_at\":\"1970-01-01T00:00:00Z\","
-        "\"metadata\":{\"firmware_generated\":true}}",
-        g_config.deployment_id);
+    /* Try MQTT first (real-time, also receives pending commands).
+     * Fall back to HTTP REST if MQTT is unavailable or times out. */
+    clawcam_mqtt_config_t mqtt_cfg;
+    clawcam_mqtt_default_config(&mqtt_cfg, CLAWCAM_DEVICE_ID);
+    esp_err_t mqtt_err = clawcam_mqtt_publish_event(&mqtt_cfg, event_json, NULL, &g_config);
+    bool uploaded_via_mqtt = (mqtt_err == ESP_OK);
 
-    esp_err_t reg_err = clawcam_gateway_client_register_device(&gateway_config, device_json);
-    if (reg_err != ESP_OK) {
-        ESP_LOGW(TAG, "gateway device registration failed (%s); SD remains source of truth",
-                 esp_err_to_name(reg_err));
-    } else {
-        esp_err_t up_err = clawcam_gateway_client_upload_event(&gateway_config, event_json);
-        if (up_err != ESP_OK) {
-            ESP_LOGW(TAG, "gateway event upload failed (%s); SD remains source of truth",
-                     esp_err_to_name(up_err));
+    if (!uploaded_via_mqtt) {
+        /* MQTT unavailable — fall back to HTTP REST */
+        clawcam_gateway_client_config_t gateway_config;
+        ESP_ERROR_CHECK(clawcam_gateway_client_default_config(&gateway_config));
+        char device_json[768];
+        snprintf(device_json, sizeof(device_json),
+            "{\"device_id\":\"" CLAWCAM_DEVICE_ID "\","
+            "\"device_type\":\"node\","
+            "\"name\":\"ESP32-S3-EYE Field Node\","
+            "\"hardware\":{\"board\":\"esp32-s3-eye-v2.2\",\"mcu\":\"esp32-s3\",\"camera\":\"ov2640\",\"storage\":\"sd/fatfs\"},"
+            "\"firmware\":{\"name\":\"clawcam-node-espidf\",\"version\":\"0.1.0\",\"source\":\"field-firmware\"},"
+            "\"deployment_id\":\"%s\","
+            "\"capabilities\":[" CLAWCAM_ESP32_S3_EYE_CAPABILITIES "],"
+            "\"status\":\"active\","
+            "\"created_at\":\"1970-01-01T00:00:00Z\","
+            "\"last_seen_at\":\"1970-01-01T00:00:00Z\","
+            "\"metadata\":{\"firmware_generated\":true}}",
+            g_config.deployment_id);
+
+        esp_err_t reg_err = clawcam_gateway_client_register_device(&gateway_config, device_json);
+        if (reg_err != ESP_OK) {
+            ESP_LOGW(TAG, "HTTP device registration failed (%s); SD remains source of truth",
+                     esp_err_to_name(reg_err));
         } else {
-            clawcam_power_record_transmission();
+            esp_err_t up_err = clawcam_gateway_client_upload_event(&gateway_config, event_json);
+            if (up_err != ESP_OK) {
+                ESP_LOGW(TAG, "HTTP event upload failed (%s); SD remains source of truth",
+                         esp_err_to_name(up_err));
+            } else {
+                clawcam_power_record_transmission();
+            }
         }
+    } else {
+        clawcam_power_record_transmission();
     }
 #else
     ESP_LOGI(TAG, "gateway upload disabled; SD event is source of truth");

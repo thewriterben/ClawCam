@@ -16,23 +16,30 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from clawcam_gateway.storage.database import GatewayDatabase
 
 
-@dataclass(frozen=True)
+@dataclass
 class ToolContext:
     """Shared context for ClawCam gateway tool calls."""
 
     database_path: Path | str = "clawcam_gateway.db"
+    mqtt_bridge: Optional[Any] = field(default=None, repr=False)  # MQTTBridge | None
 
     @property
     def db(self) -> GatewayDatabase:
         return GatewayDatabase(self.database_path)
+
+    def publish_command(self, device_id: str, command: dict[str, Any]) -> bool:
+        """Push a queued command to the node via MQTT if bridge is active."""
+        if self.mqtt_bridge is not None:
+            return self.mqtt_bridge.publish_command(device_id, command)
+        return False
 
 
 def get_recent_detections(context: ToolContext, limit: int = 25) -> dict[str, Any]:
@@ -136,6 +143,7 @@ def capture_now(context: ToolContext, device_id: str, reason: str | None = None)
         "queued_at": datetime.now(timezone.utc).isoformat(),
     }
     db.add_pending_command(command)
+    mqtt_pushed = context.publish_command(device_id, command)
 
     return {
         "ok": True,
@@ -143,6 +151,7 @@ def capture_now(context: ToolContext, device_id: str, reason: str | None = None)
         "command_id": command_id,
         "device_id": device_id,
         "status": "queued",
+        "mqtt_pushed": mqtt_pushed,
         "message": "Capture command queued. The node will execute it on its next wake cycle.",
     }
 
@@ -188,6 +197,7 @@ def apply_config_patch(
         "queued_at": datetime.now(timezone.utc).isoformat(),
     }
     db.add_pending_command(command)
+    mqtt_pushed = context.publish_command(device_id, command)
 
     return {
         "ok": True,
@@ -197,6 +207,7 @@ def apply_config_patch(
         "status": "queued",
         "patch_keys": list(patch.keys()),
         "approval_id": approval_id,
+        "mqtt_pushed": mqtt_pushed,
         "message": "Config patch queued. The node will apply it on its next wake cycle.",
     }
 

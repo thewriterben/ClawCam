@@ -2,7 +2,7 @@
 
 This document is the source of truth for current implementation maturity. ClawCam tracks progress for **working code**, **scaffolds**, **frameworks**, and **planned features**.
 
-## Current Repository State (Phase 3A Complete)
+## Current Repository State (Phase 3B Complete)
 
 | Area                            | Status             | Notes                                                                                         |
 |---------------------------------|--------------------|-----------------------------------------------------------------------------------------------|
@@ -25,9 +25,12 @@ This document is the source of truth for current implementation maturity. ClawCa
 | AI inference pipeline           | ✅ **Working**      | BaseDetector/MockDetector/MegaDetectorV5; media upload → inference → results in SQLite.      |
 | Inference MCP tools             | ✅ **Working**      | get_inference_results, list_species_detections; auto-approved by brain adapter.              |
 | Phase 3A inference tests        | ✅ **Working**      | Detector abstraction, pipeline, DB methods, REST endpoints, tool functions — all covered.    |
+| MQTT bridge (gateway)           | ✅ **Working**      | paho-mqtt bridge; subscribes to events/health/ack; publishes commands on queue.              |
+| MQTT firmware component         | ✅ **Working**      | clawcam_mqtt: publishes events, receives commands via MQTT; falls back to HTTP.              |
+| MQTT command push               | ✅ **Working**      | capture_now/apply_config_patch push immediately to node MQTT topic on queue.                 |
+| Phase 3B MQTT tests             | ✅ **Working**      | Topic naming, event/health/ack routing, command publish, ToolContext integration.            |
 | Cloud backend                   | 🔲 **Planned**      | Deferred until local system achieves MVP with real hardware.                                  |
-| MQTT bridge                     | 🔲 **Planned**      | Phase 3B; gateway ↔ node real-time channel.                                                   |
-| OTA firmware update             | 🔲 **Planned**      | Phase 3B; update command via gateway queue + ESP-IDF OTA API.                                 |
+| OTA firmware update             | 🔲 **Planned**      | Phase 3C; update command via gateway queue + ESP-IDF OTA API.                                 |
 
 Ground Rules:
 - No feature will be described as "Working" until verified with tests and reproducible steps.
@@ -64,10 +67,25 @@ Phase 3A adds species detection to every uploaded image, without blocking the ev
 5. **New MCP tools**: `get_inference_results` and `list_species_detections` — both auto-approved
    by the brain adapter, enabling queries like "what animals were detected today?"
 
-## Next Milestone (Phase 3B): Real-Time Transport & OTA
+## Phase 3B Complete — MQTT Real-Time Transport
 
-- MQTT bridge: real-time gateway ↔ node channel (eliminates polling for urgent commands)
-- OTA firmware update: gateway queues update command; node downloads via ESP-IDF OTA API
+Phase 3B adds a real-time command channel between the gateway and nodes:
+
+1. **Gateway MQTT bridge** (`mqtt_bridge/bridge.py`) connects to any MQTT 3.1.1 broker
+   (Mosquitto, EMQX). Subscribes to `clawcam/+/events`, `clawcam/+/health`, `clawcam/+/ack`;
+   writes to the same SQLite DB as the HTTP ingest path. Enabled via `CLAWCAM_MQTT_ENABLED=true`.
+2. **Immediate command push**: when `capture_now` or `apply_config_patch` queues a command,
+   it is also published to `clawcam/{device_id}/commands` (QoS 1) so connected nodes receive
+   it without waiting for their next polling wake cycle.
+3. **Firmware `clawcam_mqtt`** component publishes events via MQTT on each wake and waits
+   3 seconds for incoming commands. Falls back to HTTP REST if the broker is unreachable.
+   Compile-gated behind `CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED` — stub mode logs topics.
+4. **FastAPI lifespan** starts/stops the bridge thread automatically; disabled by default
+   so the gateway runs without a broker in offline/dev mode.
+
+## Next Milestone (Phase 3C): OTA & Cloud
+
+- OTA firmware update: gateway queues firmware update command; node downloads via ESP-IDF OTA
 - Cloud storage backend for off-site media archival
 
 ---

@@ -23,7 +23,7 @@ from clawcam_gateway.tools import (
 )
 
 
-def dispatch_tool(name: str, arguments: dict[str, Any] | None = None, database_path: str | Path = "clawcam_gateway.db") -> dict[str, Any]:
+def dispatch_tool(name: str, arguments: dict[str, Any] | None = None, database_path: str | Path = "clawcam_gateway.db", mqtt_bridge=None) -> dict[str, Any]:
     """Dispatch a ClawCam tool call by name.
 
     Args:
@@ -33,7 +33,7 @@ def dispatch_tool(name: str, arguments: dict[str, Any] | None = None, database_p
     """
 
     args = arguments or {}
-    context = ToolContext(database_path=database_path)
+    context = ToolContext(database_path=database_path, mqtt_bridge=mqtt_bridge)
     dispatch: dict[str, Callable[..., dict[str, Any]]] = {
         "get_recent_detections": lambda **kw: get_recent_detections(context, **kw),
         "get_node_health": lambda **kw: get_node_health(context, **kw),
