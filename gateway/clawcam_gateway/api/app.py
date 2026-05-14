@@ -29,6 +29,13 @@ class ToolRequest(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
+class CommandAck(BaseModel):
+    """Node acknowledgement for a dispatched command."""
+
+    status: str  # "executed" | "failed" | "skipped"
+    result: dict[str, Any] = Field(default_factory=dict)
+
+
 def create_app(config: GatewayConfig | None = None) -> FastAPI:
     config = config or GatewayConfig.from_env()
     db = GatewayDatabase(config.database_path)
@@ -95,6 +102,41 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="no health record found")
         return health
 
+    # ── Node command transport (Phase 2) ──────────────────────────────────
+
+    @app.get("/api/v1/commands/{device_id}/pending")
+    def get_pending_commands(device_id: str, limit: int = 10) -> dict[str, Any]:
+        """Return queued commands for a node. Called by the node on each wake cycle."""
+        if db.get_device(device_id) is None:
+            raise HTTPException(status_code=404, detail=f"unknown device: {device_id}")
+        safe_limit = max(1, min(limit, 50))
+        commands = db.list_pending_commands(device_id=device_id, status="queued")[:safe_limit]
+        # Mark returned commands as "delivered" so they aren't re-sent on the next poll
+        for cmd in commands:
+            db.update_command_status(cmd["command_id"], "delivered")
+        return {"ok": True, "device_id": device_id, "commands": commands, "count": len(commands)}
+
+    @app.post("/api/v1/commands/{command_id}/ack")
+    def ack_command(command_id: str, ack: CommandAck) -> dict[str, Any]:
+        """Node reports execution result for a delivered command."""
+        allowed = {"executed", "failed", "skipped"}
+        if ack.status not in allowed:
+            raise HTTPException(status_code=400, detail=f"status must be one of {sorted(allowed)}")
+        updated = db.update_command_status(command_id, ack.status, result=ack.result)
+        if not updated:
+            raise HTTPException(status_code=404, detail=f"unknown command_id: {command_id}")
+        return {"ok": True, "command_id": command_id, "status": ack.status}
+
+    @app.get("/api/v1/devices/{device_id}/capabilities")
+    def device_capabilities(device_id: str) -> dict[str, Any]:
+        """Return the capability groups declared by a node."""
+        caps = db.get_device_capabilities(device_id)
+        if db.get_device(device_id) is None:
+            raise HTTPException(status_code=404, detail=f"unknown device: {device_id}")
+        return {"ok": True, "device_id": device_id, "capabilities": caps}
+
+    # ── Tools ─────────────────────────────────────────────────────────────
+
     @app.get("/api/v1/tools")
     def list_tools() -> dict[str, Any]:
         return {
@@ -103,6 +145,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
                 {"name": "get_node_health", "approval_required": False},
                 {"name": "generate_daily_summary", "approval_required": False},
                 {"name": "list_pending_commands", "approval_required": False},
+                {"name": "list_capabilities", "approval_required": False},
                 {"name": "capture_now", "approval_required": True},
                 {"name": "apply_config_patch", "approval_required": True},
             ]

@@ -66,8 +66,17 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "list_capabilities",
+        "description": "Return the ESP-Claw capability groups declared by a ClawCam node.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["device_id"],
+            "properties": {"device_id": {"type": "string"}},
+        },
+    },
+    {
         "name": "capture_now",
-        "description": "Request a manual capture from a reachable ClawCam node. This is approval-gated and not implemented in Phase 1.",
+        "description": "Request a manual capture from a reachable ClawCam node. Approval-gated; requires cap_clawcam_camera_trap.",
         "inputSchema": {
             "type": "object",
             "required": ["device_id"],
@@ -76,7 +85,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     },
     {
         "name": "apply_config_patch",
-        "description": "Apply an approved configuration patch. This is approval-gated and not implemented in Phase 1.",
+        "description": "Apply an approved configuration patch to a node. Approval-gated; patch is queued for node pickup.",
         "inputSchema": {
             "type": "object",
             "required": ["device_id", "patch"],

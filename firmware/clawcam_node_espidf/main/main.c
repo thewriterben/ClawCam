@@ -2,11 +2,13 @@
  * ClawCam Node firmware — deterministic PIR → capture → deep-sleep loop.
  *
  * Boot flow:
- *   1. Init all components.
- *   2. Check wake reason (PIR EXT0, timer, or power-on).
- *   3. Skip capture on low battery; sleep longer.
- *   4. Run capture cycle: image → metadata → event JSON → SD persist → gateway upload.
- *   5. Configure PIR + timer wake sources and enter deep sleep.
+ *   1. Load NVS config (defaults if first boot).
+ *   2. Init all components.
+ *   3. Check wake reason (PIR EXT0, timer, or power-on).
+ *   4. Skip capture on low battery; sleep longer.
+ *   5. Run capture cycle: image → metadata → event JSON → SD persist → gateway upload.
+ *   6. Poll gateway command queue and execute any pending commands.
+ *   7. Configure PIR + timer wake sources and enter deep sleep.
  *
  * On first power-on, the optional camera smoke test runs (Kconfig-gated) before
  * the device enters its first sleep interval.
@@ -23,6 +25,9 @@
 #include "esp_timer.h"
 
 #include "clawcam_camera.h"
+#include "clawcam_capabilities.h"
+#include "clawcam_command_client.h"
+#include "clawcam_config.h"
 #include "clawcam_events.h"
 #include "clawcam_gateway_client.h"
 #include "clawcam_motion.h"
@@ -51,17 +56,15 @@
 
 #define CLAWCAM_PIR_GPIO               13
 #define CLAWCAM_DEVICE_ID              "esp32-s3-eye-v2.2-node"
-#define CLAWCAM_DEPLOYMENT_ID          "field-deployment-01"
 #define CLAWCAM_BOARD_PROFILE          "esp32-s3-eye-v2.2"
 
-/* Timer wake fallback: node wakes every 5 minutes even without PIR activity */
-#define CLAWCAM_SLEEP_SECONDS          300ULL
-/* Low-battery sleep: 30 minutes, PIR can still wake early */
-#define CLAWCAM_LOW_BATTERY_SLEEP_SECONDS 1800ULL
 /* Minimum unix epoch considered a valid wall-clock time (2020-01-01) */
 #define CLAWCAM_MIN_VALID_EPOCH        1577836800LL
 
 static const char *TAG = "clawcam_node";
+
+/* NVS-backed config — loaded at boot, used throughout the wake cycle */
+static clawcam_config_t g_config;
 
 /* ── Helpers ────────────────────────────────────────────────────────────── */
 
@@ -93,7 +96,7 @@ static void init_components(void)
         .battery_adc_channel    = 0,
         .pir_wake_gpio          = CLAWCAM_PIR_GPIO,
         .battery_capacity_mah   = 6600.0f,
-        .low_battery_threshold_v = 3.55f,
+        .low_battery_threshold_v = g_config.low_battery_threshold_v,
         .energy_tracking_enabled = true,
     };
     clawcam_storage_config_t storage_config;
@@ -178,7 +181,7 @@ static void persist_capture(
         .event_id       = event_id,
         .event_type     = "capture",
         .device_id      = CLAWCAM_DEVICE_ID,
-        .deployment_id  = CLAWCAM_DEPLOYMENT_ID,
+        .deployment_id  = g_config.deployment_id,
         .timestamp      = timestamp,
         .time_source    = time_source,
         .media_id       = media_id,
@@ -207,18 +210,20 @@ static void persist_capture(
 #if CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED
     clawcam_gateway_client_config_t gateway_config;
     ESP_ERROR_CHECK(clawcam_gateway_client_default_config(&gateway_config));
-    const char *device_json =
+    char device_json[768];
+    snprintf(device_json, sizeof(device_json),
         "{\"device_id\":\"" CLAWCAM_DEVICE_ID "\","
         "\"device_type\":\"node\","
         "\"name\":\"ESP32-S3-EYE Field Node\","
         "\"hardware\":{\"board\":\"esp32-s3-eye-v2.2\",\"mcu\":\"esp32-s3\",\"camera\":\"ov2640\",\"storage\":\"sd/fatfs\"},"
         "\"firmware\":{\"name\":\"clawcam-node-espidf\",\"version\":\"0.1.0\",\"source\":\"field-firmware\"},"
-        "\"deployment_id\":\"" CLAWCAM_DEPLOYMENT_ID "\","
-        "\"capabilities\":[\"camera\",\"sd_fatfs\",\"event_artifact\",\"gateway_upload\",\"deep_sleep_pir\"],"
+        "\"deployment_id\":\"%s\","
+        "\"capabilities\":[" CLAWCAM_ESP32_S3_EYE_CAPABILITIES "],"
         "\"status\":\"active\","
         "\"created_at\":\"1970-01-01T00:00:00Z\","
-        "\"last_seen_at\":\"" "1970-01-01T00:00:00Z" "\","
-        "\"metadata\":{\"firmware_generated\":true}}";
+        "\"last_seen_at\":\"1970-01-01T00:00:00Z\","
+        "\"metadata\":{\"firmware_generated\":true}}",
+        g_config.deployment_id);
 
     esp_err_t reg_err = clawcam_gateway_client_register_device(&gateway_config, device_json);
     if (reg_err != ESP_OK) {
@@ -324,11 +329,31 @@ static void enter_field_sleep(uint64_t sleep_seconds)
     /* never reached */
 }
 
+/* ── Command client callback ────────────────────────────────────────────── */
+
+static void on_command_capture(const char *command_id, const char *reason)
+{
+    ESP_LOGI(TAG, "executing gateway capture command: id=%s reason=%s", command_id, reason);
+    run_capture_cycle(reason[0] != '\0' ? reason : "command");
+}
+
 /* ── Entry point ────────────────────────────────────────────────────────── */
 
 void app_main(void)
 {
     ESP_LOGI(TAG, "ClawCam node firmware starting");
+
+    /* Load NVS config first — provides sleep intervals and deployment metadata */
+    esp_err_t cfg_err = clawcam_config_load(&g_config);
+    if (cfg_err != ESP_OK) {
+        ESP_LOGW(TAG, "config load failed (%s); using factory defaults", esp_err_to_name(cfg_err));
+        clawcam_config_defaults(&g_config);
+    }
+    ESP_LOGI(TAG, "config: deploy=%s site=%s interval=%lus lo_batt=%lus",
+             g_config.deployment_id, g_config.site_name,
+             (unsigned long)g_config.capture_interval_s,
+             (unsigned long)g_config.low_battery_sleep_s);
+
     init_components();
 
     /* Smoke test runs once on bench / first power-on to validate hardware */
@@ -358,9 +383,9 @@ void app_main(void)
 
     /* Low battery: skip capture and sleep longer to conserve energy */
     if (power_state.low_battery) {
-        ESP_LOGW(TAG, "low battery — skipping capture, sleeping %llus",
-                 (unsigned long long)CLAWCAM_LOW_BATTERY_SLEEP_SECONDS);
-        enter_field_sleep(CLAWCAM_LOW_BATTERY_SLEEP_SECONDS);
+        ESP_LOGW(TAG, "low battery — skipping capture, sleeping %lus",
+                 (unsigned long)g_config.low_battery_sleep_s);
+        enter_field_sleep((uint64_t)g_config.low_battery_sleep_s);
         return;
     }
 
@@ -372,5 +397,23 @@ void app_main(void)
     }
     /* On first boot: smoke test already ran above; skip a redundant capture */
 
-    enter_field_sleep(CLAWCAM_SLEEP_SECONDS);
+    /* Poll gateway command queue and execute any pending commands */
+#if CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED
+    clawcam_gateway_client_config_t gw_cfg;
+    if (clawcam_gateway_client_default_config(&gw_cfg) == ESP_OK) {
+        const clawcam_command_client_config_t cmd_cfg = {
+            .gateway_config       = &gw_cfg,
+            .device_id            = CLAWCAM_DEVICE_ID,
+            .node_config          = &g_config,
+            .capture_cb           = on_command_capture,
+            .max_commands_per_wake = 5,
+        };
+        int handled = clawcam_command_client_poll(&cmd_cfg);
+        if (handled > 0) {
+            ESP_LOGI(TAG, "executed %d gateway command(s) this wake cycle", handled);
+        }
+    }
+#endif
+
+    enter_field_sleep((uint64_t)g_config.capture_interval_s);
 }

@@ -254,13 +254,35 @@ class GatewayDatabase:
                 ).fetchall()
         return [json.loads(row["payload_json"]) for row in rows]
 
-    def update_command_status(self, command_id: str, status: str) -> bool:
+    def update_command_status(self, command_id: str, status: str, result: dict[str, Any] | None = None) -> bool:
         with self.connect() as conn:
-            cursor = conn.execute(
-                "UPDATE pending_commands SET status = ?, updated_at = datetime('now') WHERE command_id = ?",
-                (status, command_id),
-            )
+            if result is not None:
+                existing = conn.execute(
+                    "SELECT payload_json FROM pending_commands WHERE command_id = ?",
+                    (command_id,),
+                ).fetchone()
+                if existing:
+                    payload = json.loads(existing["payload_json"])
+                    payload["status"] = status
+                    payload["result"] = result
+                    cursor = conn.execute(
+                        "UPDATE pending_commands SET status = ?, payload_json = ?, updated_at = datetime('now') WHERE command_id = ?",
+                        (status, json.dumps(payload, sort_keys=True), command_id),
+                    )
+                else:
+                    return False
+            else:
+                cursor = conn.execute(
+                    "UPDATE pending_commands SET status = ?, updated_at = datetime('now') WHERE command_id = ?",
+                    (status, command_id),
+                )
         return cursor.rowcount > 0
+
+    def get_device_capabilities(self, device_id: str) -> list[str]:
+        device = self.get_device(device_id)
+        if device is None:
+            return []
+        return device.get("capabilities", [])
 
     def latest_health(self, device_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
