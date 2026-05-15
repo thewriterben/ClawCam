@@ -10,6 +10,7 @@ venv/
 *.db-shm
 *.db-wal
 media/
+!samples/firmware-bundle/media/
 uploads/
 
 # Firmware build outputs

@@ -44,9 +44,14 @@ def test_import_firmware_bundle_can_reference_media_in_place(tmp_path) -> None:
     assert result.imported_events == ["evt-smoke-123"]
     assert result.copied_media == []
     assert len(result.referenced_media) == 1
-    assert result.referenced_media[0].endswith("samples/firmware-bundle/media/smoke-123.jpg")
+    # Normalise path separators so the assertion works on both Windows and POSIX.
+    assert Path(result.referenced_media[0]).as_posix().endswith(
+        "samples/firmware-bundle/media/smoke-123.jpg"
+    )
     event = db.recent_events(limit=1)[0]
-    assert event["media"][0]["path"].endswith("samples/firmware-bundle/media/smoke-123.jpg")
+    assert Path(event["media"][0]["path"]).as_posix().endswith(
+        "samples/firmware-bundle/media/smoke-123.jpg"
+    )
 
 
 def test_import_firmware_bundle_cli(tmp_path) -> None:
