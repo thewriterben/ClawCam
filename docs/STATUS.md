@@ -2,7 +2,7 @@
 
 This document is the source of truth for current implementation maturity. ClawCam tracks progress for **working code**, **scaffolds**, **frameworks**, and **planned features**.
 
-## Current Repository State (Phase 3C Complete)
+## Current Repository State (Phase 4 Complete)
 
 | Area                            | Status             | Notes                                                                                         |
 |---------------------------------|--------------------|-----------------------------------------------------------------------------------------------|
@@ -31,7 +31,9 @@ This document is the source of truth for current implementation maturity. ClawCa
 | Phase 3B MQTT tests             | ✅ **Working**      | Topic naming, event/health/ack routing, command publish, ToolContext integration.            |
 | OTA firmware update             | ✅ **Working**      | Phase 3C; gateway serves .bin; queue_firmware_update tool; clawcam_ota component.           |
 | Phase 3C OTA tests              | ✅ **Working**      | Firmware upload/list/download REST, DB CRUD, tool functions, dispatch, adapter policy.       |
-| Cloud backend                   | 🔲 **Planned**      | Deferred until local system achieves MVP with real hardware.                                  |
+| Cloud storage backend           | ✅ **Working**      | BaseCloudStore/S3Store/GCSStore/NoopStore; cloud_uploads tracking; auto-upload on media post. |
+| Cloud MCP tool                  | ✅ **Working**      | get_cloud_sync_status; auto-approved; reports pending/uploaded/failed counts per event.       |
+| Phase 4 cloud tests             | ✅ **Working**      | Store abstraction, worker, DB CRUD, REST endpoint, tool, config env-vars, adapter policy.    |
 
 Ground Rules:
 - No feature will be described as "Working" until verified with tests and reproducible steps.
@@ -107,8 +109,29 @@ Phase 3C closes the firmware update loop, enabling the brain to push new firmwar
 7. **Brain adapter policy**: `list_firmware_builds` is auto-approved; `queue_firmware_update`
    is in `always_ask` — the brain must obtain explicit user confirmation before queuing.
 
-## Next Milestone: Cloud Backend
+## Phase 4 Complete — Cloud Storage Backend
 
-- Cloud storage backend for off-site media archival (S3/GCS sync)
+Phase 4 adds off-site media archival without changing the offline-first guarantee:
+
+1. **`BaseCloudStore` abstraction** with three implementations:
+   - `NoopStore`: always available, logs upload intent, returns `noop://` URIs — zero config needed.
+   - `S3Store`: uses lazy-imported `boto3`; supports AWS S3 and any S3-compatible endpoint
+     (MinIO, LocalStack) via `CLAWCAM_CLOUD_ENDPOINT_URL`.
+   - `GCSStore`: uses lazy-imported `google-cloud-storage`; application-default credentials.
+2. **`CloudUploadWorker`**: called from a FastAPI `BackgroundTask` after each media upload.
+   Inserts a `cloud_uploads` DB row, attempts the upload, and updates status to "uploaded"
+   or "failed". Never raises — the media ingest path is unaffected by cloud failures.
+3. **`cloud_uploads` SQLite table**: tracks upload_id, event_id, media_path, remote_uri,
+   provider, status, error, queued_at, uploaded_at. Indexed by event and status.
+4. **`get_cloud_sync_status` MCP tool** (auto-approved): returns upload summary counts
+   (pending/uploaded/failed) and a paginated record list with optional filters.
+5. **Config**: `CLAWCAM_CLOUD_ENABLED`, `CLAWCAM_CLOUD_PROVIDER`, `CLAWCAM_CLOUD_BUCKET`,
+   `CLAWCAM_CLOUD_PREFIX`, `CLAWCAM_CLOUD_REGION`, `CLAWCAM_CLOUD_ENDPOINT_URL`.
+   Cloud is disabled by default — existing deployments are unaffected.
+
+## Next Milestone: Hardware Integration
+
+- Deploy on physical ESP32-S3-EYE; end-to-end field test with real PIR triggers and JPEG captures
+- Validate MQTT connectivity and OTA firmware update on device
 
 ---

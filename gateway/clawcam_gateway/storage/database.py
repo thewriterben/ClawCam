@@ -133,6 +133,23 @@ class GatewayDatabase:
                     size_bytes INTEGER NOT NULL,
                     uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
                 );
+
+                CREATE TABLE IF NOT EXISTS cloud_uploads (
+                    upload_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id TEXT,
+                    media_path TEXT NOT NULL,
+                    remote_uri TEXT,
+                    provider TEXT NOT NULL DEFAULT 'noop',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    error TEXT,
+                    queued_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    uploaded_at TEXT,
+                    FOREIGN KEY(event_id) REFERENCES events(event_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_cloud_uploads_event ON cloud_uploads(event_id);
+                CREATE INDEX IF NOT EXISTS idx_cloud_uploads_status ON cloud_uploads(status);
+                CREATE INDEX IF NOT EXISTS idx_cloud_uploads_queued ON cloud_uploads(queued_at);
                 """
             )
 
@@ -432,6 +449,81 @@ class GatewayDatabase:
                 "SELECT * FROM firmware_builds ORDER BY uploaded_at DESC"
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def add_cloud_upload(
+        self,
+        event_id: str | None,
+        media_path: str,
+        provider: str = "noop",
+    ) -> int:
+        """Insert a cloud_uploads row with status='pending'. Returns upload_id."""
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO cloud_uploads (event_id, media_path, provider, status)
+                VALUES (?, ?, ?, 'pending')
+                """,
+                (event_id, media_path, provider),
+            )
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    def update_cloud_upload(
+        self,
+        upload_id: int,
+        status: str,
+        remote_uri: str | None = None,
+        error: str | None = None,
+        uploaded_at: str | None = None,
+    ) -> None:
+        """Update status and optional fields for a cloud_uploads row."""
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE cloud_uploads
+                SET status = ?, remote_uri = ?, error = ?, uploaded_at = ?
+                WHERE upload_id = ?
+                """,
+                (status, remote_uri, error, uploaded_at, upload_id),
+            )
+
+    def list_cloud_uploads(
+        self,
+        limit: int = 25,
+        status: str | None = None,
+        event_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return recent cloud upload records with optional filtering."""
+        clauses = []
+        params: list[Any] = []
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if event_id:
+            clauses.append("event_id = ?")
+            params.append(event_id)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT upload_id, event_id, media_path, remote_uri, provider,
+                       status, error, queued_at, uploaded_at
+                FROM cloud_uploads
+                {where}
+                ORDER BY queued_at DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_cloud_upload_summary(self) -> dict[str, int]:
+        """Return counts grouped by status: {pending: N, uploaded: N, failed: N}."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT status, COUNT(*) as cnt FROM cloud_uploads GROUP BY status"
+            ).fetchall()
+        return {row["status"]: row["cnt"] for row in rows}
 
     def latest_health(self, device_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:

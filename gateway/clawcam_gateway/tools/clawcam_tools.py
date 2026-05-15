@@ -356,6 +356,39 @@ def list_species_detections(
     }
 
 
+def get_cloud_sync_status(
+    context: ToolContext,
+    limit: int = 25,
+    status: str | None = None,
+    event_id: str | None = None,
+) -> dict[str, Any]:
+    """Return cloud upload status for recent media files.
+
+    Shows which images have been successfully synced to cloud storage,
+    which are pending, and which failed (with error messages).
+
+    Arguments
+    ---------
+    limit:    Maximum results to return (1–100, default 25).
+    status:   Filter by upload status: "pending", "uploaded", or "failed".
+    event_id: Filter to a specific event.
+    """
+    db = context.db
+    safe_limit = max(1, min(int(limit), 100))
+    uploads = db.list_cloud_uploads(
+        limit=safe_limit,
+        status=status,
+        event_id=event_id,
+    )
+    summary = db.get_cloud_upload_summary()
+    return {
+        "ok": True,
+        "summary": summary,
+        "count": len(uploads),
+        "uploads": uploads,
+    }
+
+
 def _validate_config_patch(patch: dict[str, Any]) -> None:
     """Reject patches that reference protected keys."""
 

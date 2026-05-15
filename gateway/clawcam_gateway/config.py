@@ -25,6 +25,13 @@ class GatewayConfig:
     mqtt_username: str | None = None
     mqtt_password: str | None = None
     mqtt_topic_root: str = "clawcam"
+    # Cloud storage (off-site media archival)
+    cloud_enabled: bool = False           # disabled by default; zero impact if not configured
+    cloud_provider: str = "noop"          # "s3", "gcs", "noop"
+    cloud_bucket: str = ""
+    cloud_prefix: str = "clawcam/"       # remote key prefix
+    cloud_region: str | None = None      # AWS region (S3 only)
+    cloud_endpoint_url: str | None = None  # custom endpoint for MinIO / LocalStack
 
     @classmethod
     def from_env(cls) -> "GatewayConfig":
@@ -44,4 +51,10 @@ class GatewayConfig:
             mqtt_username=os.getenv("CLAWCAM_MQTT_USERNAME"),
             mqtt_password=os.getenv("CLAWCAM_MQTT_PASSWORD"),
             mqtt_topic_root=os.getenv("CLAWCAM_MQTT_ROOT", "clawcam"),
+            cloud_enabled=os.getenv("CLAWCAM_CLOUD_ENABLED", "false").lower() == "true",
+            cloud_provider=os.getenv("CLAWCAM_CLOUD_PROVIDER", "noop"),
+            cloud_bucket=os.getenv("CLAWCAM_CLOUD_BUCKET", ""),
+            cloud_prefix=os.getenv("CLAWCAM_CLOUD_PREFIX", "clawcam/"),
+            cloud_region=os.getenv("CLAWCAM_CLOUD_REGION"),
+            cloud_endpoint_url=os.getenv("CLAWCAM_CLOUD_ENDPOINT_URL"),
         )
