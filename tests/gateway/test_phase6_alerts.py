@@ -89,7 +89,11 @@ def tmp_db(tmp_path: Path) -> GatewayDatabase:
     db = GatewayDatabase(tmp_path / "test.db")
     db.upsert_device({
         "device_id": "alert-dev-1",
+        "device_type": "node",
         "name": "Alert Test Node",
+        "status": "active",
+        "created_at": "2026-05-14T00:00:00Z",
+        "last_seen_at": "2026-05-14T00:00:00Z",
         "hardware": "test",
         "firmware_version": "1.0.0",
         "capabilities": ["cap_clawcam_camera_trap"],
@@ -101,7 +105,7 @@ def tmp_db(tmp_path: Path) -> GatewayDatabase:
         "device_id": "alert-dev-1",
         "timestamp": "2026-05-14T10:00:00Z",
         "time_source": "gps",
-        "source": "pir",
+        "source": "node",
         "media": [],
         "metadata": {},
     })

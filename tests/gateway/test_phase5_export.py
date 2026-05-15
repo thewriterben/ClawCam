@@ -63,7 +63,11 @@ def tmp_db(tmp_path: Path) -> GatewayDatabase:
     # Register a device
     db.upsert_device({
         "device_id": "export-dev-1",
+        "device_type": "node",
         "name": "Export Test Node",
+        "status": "active",
+        "created_at": "2026-05-14T00:00:00Z",
+        "last_seen_at": "2026-05-14T00:00:00Z",
         "hardware": "test",
         "firmware_version": "1.0.0",
         "capabilities": ["cap_clawcam_camera_trap"],
@@ -80,8 +84,11 @@ def db_with_events(tmp_db: GatewayDatabase) -> GatewayDatabase:
         "device_id": "export-dev-1",
         "timestamp": "2026-05-14T10:00:00Z",
         "time_source": "gps",
-        "source": "pir",
-        "media": [{"media_id": "m1"}, {"media_id": "m2"}],
+        "source": "node",
+        "media": [
+            {"media_id": "m1", "media_type": "image"},
+            {"media_id": "m2", "media_type": "image"},
+        ],
         "metadata": {"trigger": "pir"},
     })
     tmp_db.add_event({
@@ -90,7 +97,7 @@ def db_with_events(tmp_db: GatewayDatabase) -> GatewayDatabase:
         "device_id": "export-dev-1",
         "timestamp": "2026-05-14T11:00:00Z",
         "time_source": "rtc",
-        "source": "timer",
+        "source": "node",
         "media": [],
         "metadata": {},
     })

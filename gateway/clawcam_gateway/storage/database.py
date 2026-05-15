@@ -480,7 +480,7 @@ class GatewayDatabase:
     def list_firmware_builds(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM firmware_builds ORDER BY uploaded_at DESC"
+                "SELECT * FROM firmware_builds ORDER BY uploaded_at DESC, rowid DESC"
             ).fetchall()
         return [dict(row) for row in rows]
 

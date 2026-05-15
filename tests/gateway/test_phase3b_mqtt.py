@@ -113,7 +113,7 @@ class TestBridgeEventRouting:
             "device_id": "node-mqtt-001",
             "timestamp": "2026-05-13T06:00:00Z",
             "time_source": "rtc",
-            "source": "mqtt",
+            "source": "node",
         }
         msg = make_mqtt_message("clawcam/node-mqtt-001/events", event)
         bridge._on_message(None, None, msg)
@@ -129,7 +129,7 @@ class TestBridgeEventRouting:
             "device_id": "node-unknown",
             "timestamp": "2026-05-13T06:00:00Z",
             "time_source": "rtc",
-            "source": "mqtt",
+            "source": "node",
         }
         msg = make_mqtt_message("clawcam/node-unknown/events", event)
         bridge._on_message(None, None, msg)
@@ -148,7 +148,7 @@ class TestBridgeHealthRouting:
             "device_id": "node-mqtt-001",
             "timestamp": "2026-05-13T06:01:00Z",
             "status": "ok",
-            "battery_voltage": 3.8,
+            "battery": {"voltage": 3.8, "percentage": 85},
         }
         msg = make_mqtt_message("clawcam/node-mqtt-001/health", health)
         bridge._on_message(None, None, msg)
