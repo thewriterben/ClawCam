@@ -12,12 +12,18 @@ import hashlib
 import uuid as _uuid
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from clawcam_gateway.alerts.evaluator import AlertEvaluator
 from clawcam_gateway.api.dashboard import render_dashboard
 from clawcam_gateway.config import GatewayConfig
 from clawcam_gateway.inference.pipeline import InferencePipeline
+from clawcam_gateway.ingest.export import (
+    csv_filename,
+    export_detections_csv,
+    export_events_csv,
+)
 from clawcam_gateway.ingest.validation import validate_device, validate_event, validate_health
 from clawcam_gateway.mcp_server.tool_dispatch import dispatch_tool
 from clawcam_gateway.mqtt_bridge.bridge import MQTTBridge
@@ -51,6 +57,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     pipeline = InferencePipeline(db=db, enabled=config.inference_enabled)
     cloud_store = get_cloud_store(config)
     cloud_worker = CloudUploadWorker(db=db, store=cloud_store)
+    alert_evaluator = AlertEvaluator(db=db, default_webhook=config.alert_webhook_url)
     bridge = MQTTBridge(
         db=db,
         broker_host=config.mqtt_broker_host,
@@ -192,6 +199,8 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
 
         # Run inference in the background (non-blocking)
         background_tasks.add_task(pipeline.run, event_id, str(dest))
+        # Evaluate alert rules after inference completes
+        background_tasks.add_task(alert_evaluator.evaluate, event_id, None)
         # Queue cloud upload alongside inference (noop when cloud is disabled)
         background_tasks.add_task(cloud_worker.queue_and_upload, dest, event_id)
         return {"ok": True, "event_id": event_id, "media_path": str(dest), "inference": "queued"}
@@ -239,6 +248,134 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             "summary": summary,
             "uploads": uploads,
             "count": len(uploads),
+        }
+
+    # ── Alert rules (Phase 6) ────────────────────────────────────────────
+
+    @app.post("/api/v1/alert-rules")
+    def create_alert_rule(payload: Payload) -> dict[str, Any]:
+        """Create a new alert rule. Returns the created rule with its rule_id."""
+        import uuid as _uuid_mod
+        from datetime import datetime as _dt, timezone as _tz
+        data = payload.data
+        if not data.get("name"):
+            raise HTTPException(status_code=400, detail="name is required")
+        rule = {
+            "rule_id": f"rule-{_uuid_mod.uuid4().hex[:12]}",
+            "name": data["name"],
+            "label": data.get("label"),
+            "min_confidence": float(data.get("min_confidence", 0.5)),
+            "species_pattern": data.get("species_pattern"),
+            "device_id": data.get("device_id"),
+            "webhook_url": data.get("webhook_url") or config.alert_webhook_url,
+            "enabled": bool(data.get("enabled", True)),
+            "created_at": _dt.now(_tz.utc).isoformat(),
+        }
+        db.add_alert_rule(rule)
+        return {"ok": True, "rule": rule}
+
+    @app.get("/api/v1/alert-rules")
+    def list_alert_rules_endpoint() -> dict[str, Any]:
+        """Return all configured alert rules."""
+        rules = db.list_alert_rules()
+        return {"ok": True, "rules": rules, "count": len(rules)}
+
+    @app.get("/api/v1/alert-rules/{rule_id}")
+    def get_alert_rule(rule_id: str) -> dict[str, Any]:
+        """Return a single alert rule by ID."""
+        rule = db.get_alert_rule(rule_id)
+        if rule is None:
+            raise HTTPException(status_code=404, detail=f"unknown rule_id: {rule_id}")
+        return {"ok": True, "rule": rule}
+
+    @app.patch("/api/v1/alert-rules/{rule_id}")
+    def update_alert_rule(rule_id: str, payload: Payload) -> dict[str, Any]:
+        """Partially update an alert rule (enabled/disabled, webhook_url, etc.)."""
+        updated = db.update_alert_rule(rule_id, payload.data)
+        if not updated:
+            raise HTTPException(status_code=404, detail=f"unknown rule_id: {rule_id}")
+        return {"ok": True, "rule_id": rule_id, "updated": list(payload.data.keys())}
+
+    @app.delete("/api/v1/alert-rules/{rule_id}")
+    def delete_alert_rule(rule_id: str) -> dict[str, Any]:
+        """Delete an alert rule permanently."""
+        deleted = db.delete_alert_rule(rule_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"unknown rule_id: {rule_id}")
+        return {"ok": True, "rule_id": rule_id, "deleted": True}
+
+    @app.get("/api/v1/alerts")
+    def list_alerts(
+        limit: int = 25,
+        rule_id: str | None = None,
+        delivery_status: str | None = None,
+    ) -> dict[str, Any]:
+        """Return recent fired alert events."""
+        safe_limit = max(1, min(limit, 200))
+        events = db.list_alert_events(
+            limit=safe_limit,
+            rule_id=rule_id,
+            delivery_status=delivery_status,
+        )
+        return {"ok": True, "alerts": events, "count": len(events)}
+
+    # ── Data export (Phase 5) ────────────────────────────────────────────
+
+    @app.get("/api/v1/export/events.csv")
+    def export_events(
+        limit: int = 1000,
+        device_id: str | None = None,
+    ) -> StreamingResponse:
+        """Download recent events as a CSV file."""
+        safe_limit = max(1, min(limit, 10000))
+        csv_text = export_events_csv(db, limit=safe_limit, device_id=device_id)
+        filename = csv_filename("events")
+        return StreamingResponse(
+            iter([csv_text]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.get("/api/v1/export/detections.csv")
+    def export_detections(
+        limit: int = 1000,
+        label: str | None = None,
+        min_confidence: float = 0.0,
+        species: str | None = None,
+    ) -> StreamingResponse:
+        """Download recent inference detections as a CSV file."""
+        safe_limit = max(1, min(limit, 10000))
+        csv_text = export_detections_csv(
+            db,
+            limit=safe_limit,
+            label=label,
+            min_confidence=min_confidence,
+            species=species,
+        )
+        filename = csv_filename("detections")
+        return StreamingResponse(
+            iter([csv_text]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    # ── Cloud retry (Phase 5) ────────────────────────────────────────────
+
+    @app.post("/api/v1/cloud/retry")
+    def retry_failed_uploads(background_tasks: BackgroundTasks) -> dict[str, Any]:
+        """Re-queue all failed cloud uploads for retry in the background."""
+        failed = db.list_cloud_uploads(status="failed", limit=500)
+        for upload in failed:
+            media_path = Path(upload["media_path"])
+            background_tasks.add_task(
+                cloud_worker.queue_and_upload,
+                media_path,
+                upload.get("event_id"),
+            )
+        return {
+            "ok": True,
+            "retried": len(failed),
+            "message": f"{len(failed)} failed upload(s) re-queued for retry.",
         }
 
     # ── Firmware OTA (Phase 3C) ───────────────────────────────────────────
@@ -322,7 +459,11 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
                 {"name": "list_species_detections", "approval_required": False},
                 {"name": "list_firmware_builds", "approval_required": False},
                 {"name": "get_cloud_sync_status", "approval_required": False},
+                {"name": "export_detections_csv", "approval_required": False},
+                {"name": "list_alert_rules", "approval_required": False},
+                {"name": "list_recent_alerts", "approval_required": False},
                 {"name": "capture_now", "approval_required": True},
+                {"name": "create_alert_rule", "approval_required": True},
                 {"name": "apply_config_patch", "approval_required": True},
                 {"name": "queue_firmware_update", "approval_required": True},
             ]
@@ -363,6 +504,19 @@ def _dashboard_payload(db: GatewayDatabase, config: GatewayConfig, limit: int = 
     for event in events:
         for classification in event.get("classifications", []):
             labels[classification.get("label", "unknown")] += 1
+
+    # Inference summary
+    recent_detections = db.list_inference_results(limit=safe_limit)
+    detection_label_counts: Counter[str] = Counter(
+        r["top_label"] for r in recent_detections if r.get("top_label")
+    )
+    detection_species_counts: Counter[str] = Counter(
+        r["top_species"] for r in recent_detections if r.get("top_species")
+    )
+
+    # Cloud summary
+    cloud_summary = db.get_cloud_upload_summary()
+
     return {
         "gateway_id": config.gateway_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -373,6 +527,11 @@ def _dashboard_payload(db: GatewayDatabase, config: GatewayConfig, limit: int = 
         "health_by_device": health_by_device,
         "event_counts": dict(event_counts),
         "label_counts": dict(labels),
+        "recent_detections": recent_detections,
+        "detection_label_counts": dict(detection_label_counts),
+        "detection_species_counts": dict(detection_species_counts),
+        "cloud_summary": cloud_summary,
+        "cloud_enabled": config.cloud_enabled,
     }
 
 

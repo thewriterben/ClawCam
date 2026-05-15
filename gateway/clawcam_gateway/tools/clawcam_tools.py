@@ -21,6 +21,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from clawcam_gateway.ingest.export import export_detections_csv as _export_detections_csv
 from clawcam_gateway.storage.database import GatewayDatabase
 
 
@@ -386,6 +387,139 @@ def get_cloud_sync_status(
         "summary": summary,
         "count": len(uploads),
         "uploads": uploads,
+    }
+
+
+def export_detections_csv(
+    context: ToolContext,
+    limit: int = 1000,
+    label: str | None = None,
+    min_confidence: float = 0.0,
+    species: str | None = None,
+) -> dict[str, Any]:
+    """Export recent inference results as CSV text.
+
+    Returns a CSV-formatted string embedding the detection records so a brain
+    or downstream tool can write it to disk or display it inline.
+
+    Arguments
+    ---------
+    limit:          Maximum rows to export (1–10000, default 1000).
+    label:          Filter by detection label: "animal", "person", "vehicle".
+    min_confidence: Minimum top_confidence score (default 0.0 = all results).
+    species:        Substring match on species name (e.g. "deer").
+    """
+    safe_limit = max(1, min(int(limit), 10000))
+    csv_text = _export_detections_csv(
+        context.db,
+        limit=safe_limit,
+        label=label,
+        min_confidence=float(min_confidence),
+        species=species,
+    )
+    row_count = max(0, csv_text.count("\n") - 1)  # subtract header row
+    return {
+        "ok": True,
+        "csv": csv_text,
+        "row_count": row_count,
+        "filters": {
+            "limit": safe_limit,
+            "label": label,
+            "min_confidence": min_confidence,
+            "species": species,
+        },
+    }
+
+
+def list_alert_rules(context: ToolContext) -> dict[str, Any]:
+    """Return all configured alert rules.
+
+    Alert rules fire webhook notifications when the AI detects matching species,
+    labels, or confidence levels. Read-only — creating rules requires approval.
+    """
+    rules = context.db.list_alert_rules()
+    return {"ok": True, "count": len(rules), "rules": rules}
+
+
+def list_recent_alerts(
+    context: ToolContext,
+    limit: int = 25,
+    rule_id: str | None = None,
+    delivery_status: str | None = None,
+) -> dict[str, Any]:
+    """Return recent fired alert events.
+
+    Each entry shows which rule fired, what was detected, when, and whether
+    the webhook delivery succeeded.
+
+    Arguments
+    ---------
+    limit:           Maximum results to return (1–200, default 25).
+    rule_id:         Filter to a specific rule.
+    delivery_status: Filter by delivery status: "delivered" or "failed".
+    """
+    safe_limit = max(1, min(int(limit), 200))
+    events = context.db.list_alert_events(
+        limit=safe_limit,
+        rule_id=rule_id,
+        delivery_status=delivery_status,
+    )
+    return {"ok": True, "count": len(events), "alerts": events}
+
+
+def create_alert_rule(
+    context: ToolContext,
+    name: str,
+    webhook_url: str | None = None,
+    label: str | None = None,
+    min_confidence: float = 0.5,
+    species_pattern: str | None = None,
+    device_id: str | None = None,
+) -> dict[str, Any]:
+    """Create a new alert rule that fires a webhook on matching detections.
+
+    The rule is stored persistently in the gateway database and evaluated after
+    every inference result. Approval-gated — modifies gateway state.
+
+    Arguments
+    ---------
+    name:            Human-readable name for the rule (required).
+    webhook_url:     HTTP(S) endpoint to POST when the rule fires.
+                     Falls back to CLAWCAM_ALERT_WEBHOOK_URL if not set.
+    label:           Restrict to "animal", "person", or "vehicle". None = any.
+    min_confidence:  Minimum top_confidence to fire (default 0.5).
+    species_pattern: Case-insensitive substring match on species name.
+    device_id:       Only fire for events from this specific device.
+    """
+    if not name or not name.strip():
+        return {"ok": False, "error": "name is required"}
+
+    allowed_labels = {"animal", "person", "vehicle", None}
+    if label not in allowed_labels:
+        return {
+            "ok": False,
+            "error": f"label must be one of: animal, person, vehicle (got {label!r})",
+        }
+
+    safe_confidence = max(0.0, min(float(min_confidence), 1.0))
+
+    rule = {
+        "rule_id": f"rule-{uuid.uuid4().hex[:12]}",
+        "name": name.strip(),
+        "label": label,
+        "min_confidence": safe_confidence,
+        "species_pattern": species_pattern,
+        "device_id": device_id,
+        "webhook_url": webhook_url,
+        "enabled": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    context.db.add_alert_rule(rule)
+    return {
+        "ok": True,
+        "created": True,
+        "rule": rule,
+        "message": f"Alert rule '{name}' created. It will fire when detections match the criteria.",
     }
 
 
