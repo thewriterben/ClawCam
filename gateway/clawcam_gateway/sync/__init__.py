@@ -1,1 +1,1 @@
-"""ClawCam gateway scaffold package."""
+"""ClawCam gateway cloud sync package."""

@@ -22,6 +22,8 @@ from clawcam_gateway.ingest.validation import validate_device, validate_event, v
 from clawcam_gateway.mcp_server.tool_dispatch import dispatch_tool
 from clawcam_gateway.mqtt_bridge.bridge import MQTTBridge
 from clawcam_gateway.storage.database import GatewayDatabase
+from clawcam_gateway.sync.cloud_store import get_cloud_store
+from clawcam_gateway.sync.upload_worker import CloudUploadWorker
 
 
 class Payload(BaseModel):
@@ -47,6 +49,8 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     config = config or GatewayConfig.from_env()
     db = GatewayDatabase(config.database_path)
     pipeline = InferencePipeline(db=db, enabled=config.inference_enabled)
+    cloud_store = get_cloud_store(config)
+    cloud_worker = CloudUploadWorker(db=db, store=cloud_store)
     bridge = MQTTBridge(
         db=db,
         broker_host=config.mqtt_broker_host,
@@ -188,6 +192,8 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
 
         # Run inference in the background (non-blocking)
         background_tasks.add_task(pipeline.run, event_id, str(dest))
+        # Queue cloud upload alongside inference (noop when cloud is disabled)
+        background_tasks.add_task(cloud_worker.queue_and_upload, dest, event_id)
         return {"ok": True, "event_id": event_id, "media_path": str(dest), "inference": "queued"}
 
     @app.get("/api/v1/events/{event_id}/inference")
@@ -214,6 +220,26 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             species=species,
         )
         return {"ok": True, "results": results, "count": len(results)}
+
+    # ── Cloud sync (Phase 4) ─────────────────────────────────────────────
+
+    @app.get("/api/v1/cloud/uploads")
+    def cloud_upload_status(
+        limit: int = 25,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        """Return cloud upload records with optional status filter."""
+        safe_limit = max(1, min(limit, 100))
+        uploads = db.list_cloud_uploads(limit=safe_limit, status=status)
+        summary = db.get_cloud_upload_summary()
+        return {
+            "ok": True,
+            "provider": cloud_store.provider,
+            "cloud_enabled": config.cloud_enabled,
+            "summary": summary,
+            "uploads": uploads,
+            "count": len(uploads),
+        }
 
     # ── Firmware OTA (Phase 3C) ───────────────────────────────────────────
 
@@ -295,6 +321,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
                 {"name": "get_inference_results", "approval_required": False},
                 {"name": "list_species_detections", "approval_required": False},
                 {"name": "list_firmware_builds", "approval_required": False},
+                {"name": "get_cloud_sync_status", "approval_required": False},
                 {"name": "capture_now", "approval_required": True},
                 {"name": "apply_config_patch", "approval_required": True},
                 {"name": "queue_firmware_update", "approval_required": True},

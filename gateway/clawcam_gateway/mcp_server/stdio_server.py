@@ -103,6 +103,19 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "get_cloud_sync_status",
+        "description": "Return cloud upload status for gateway media files. Shows how many images are pending, uploaded, or failed for off-site archival.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25},
+                "status": {"type": "string", "enum": ["pending", "uploaded", "failed"],
+                           "description": "Filter by upload status."},
+                "event_id": {"type": "string", "description": "Filter to a specific event."},
+            },
+        },
+    },
+    {
         "name": "capture_now",
         "description": "Request a manual capture from a reachable ClawCam node. Approval-gated; requires cap_clawcam_camera_trap.",
         "inputSchema": {

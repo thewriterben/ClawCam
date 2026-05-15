@@ -47,6 +47,7 @@ class ToolPolicy:
         "get_inference_results",
         "list_species_detections",
         "list_firmware_builds",
+        "get_cloud_sync_status",
     }))
     always_ask: frozenset[str] = field(default_factory=lambda: frozenset({
         "capture_now",
