@@ -2,7 +2,7 @@
 
 This document is the source of truth for current implementation maturity. ClawCam tracks progress for **working code**, **scaffolds**, **frameworks**, and **planned features**.
 
-## Current Repository State (Phase 4 Complete)
+## Current Repository State (Phase 5 Complete)
 
 | Area                            | Status             | Notes                                                                                         |
 |---------------------------------|--------------------|-----------------------------------------------------------------------------------------------|
@@ -34,6 +34,11 @@ This document is the source of truth for current implementation maturity. ClawCa
 | Cloud storage backend           | ✅ **Working**      | BaseCloudStore/S3Store/GCSStore/NoopStore; cloud_uploads tracking; auto-upload on media post. |
 | Cloud MCP tool                  | ✅ **Working**      | get_cloud_sync_status; auto-approved; reports pending/uploaded/failed counts per event.       |
 | Phase 4 cloud tests             | ✅ **Working**      | Store abstraction, worker, DB CRUD, REST endpoint, tool, config env-vars, adapter policy.    |
+| CSV data export                 | ✅ **Working**      | events_to_csv/detections_to_csv helpers; GET /export/events.csv and /export/detections.csv.  |
+| Cloud upload retry              | ✅ **Working**      | POST /api/v1/cloud/retry re-queues all failed uploads as background tasks.                   |
+| Dashboard enrichment            | ✅ **Working**      | Inference summary, top species, cloud sync panels, export download links, 30 s auto-refresh. |
+| export_detections_csv MCP tool  | ✅ **Working**      | Returns CSV text inline; auto-approved; filters by label, species, confidence.               |
+| Phase 5 export tests            | ✅ **Working**      | CSV helpers, REST endpoints, cloud retry, dashboard payload/HTML, MCP tool, adapter policy.  |
 
 Ground Rules:
 - No feature will be described as "Working" until verified with tests and reproducible steps.
@@ -128,6 +133,31 @@ Phase 4 adds off-site media archival without changing the offline-first guarante
 5. **Config**: `CLAWCAM_CLOUD_ENABLED`, `CLAWCAM_CLOUD_PROVIDER`, `CLAWCAM_CLOUD_BUCKET`,
    `CLAWCAM_CLOUD_PREFIX`, `CLAWCAM_CLOUD_REGION`, `CLAWCAM_CLOUD_ENDPOINT_URL`.
    Cloud is disabled by default — existing deployments are unaffected.
+
+## Phase 5 Complete — Data Export, Cloud Retry, Dashboard Enrichment
+
+Phase 5 adds structured data export, cloud resilience, and a richer operator dashboard:
+
+1. **CSV export helpers** (`ingest/export.py`): `events_to_csv` and `detections_to_csv` use
+   `csv.DictWriter` on `io.StringIO` — no mandatory dependencies, returns plain `str` so callers
+   can stream, write to disk, or embed in MCP responses.
+2. **REST export endpoints**:
+   - `GET /api/v1/export/events.csv`: streams all recent events as CSV with
+     `Content-Disposition: attachment` and a timestamped filename. Accepts `limit` and `device_id`.
+   - `GET /api/v1/export/detections.csv`: streams inference results with optional `label`,
+     `min_confidence`, and `species` filters.
+3. **Cloud upload retry** (`POST /api/v1/cloud/retry`): queries all `failed` cloud_uploads rows
+   and re-queues each as a FastAPI `BackgroundTask`. Never blocks — returns `retried` count
+   immediately.
+4. **Dashboard enrichment**: `/dashboard` now includes:
+   - AI Inference panel: detection label cards + per-event results table.
+   - Top Species panel: top-5 species by detection count.
+   - Cloud Sync panel: pending/uploaded/failed counts with cloud enabled/disabled badge.
+   - Export download links in the header (events.csv, detections.csv).
+   - 30-second `<meta http-equiv="refresh">` auto-refresh so operators see live state.
+5. **`export_detections_csv` MCP tool** (auto-approved): returns the CSV as a plain string field
+   so the brain can save it or display it inline. Accepts the same filters as the REST endpoint.
+   Brain adapter policy unchanged — read-only tools need no approval.
 
 ## Next Milestone: Hardware Integration
 

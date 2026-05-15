@@ -21,6 +21,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from clawcam_gateway.ingest.export import export_detections_csv as _export_detections_csv
 from clawcam_gateway.storage.database import GatewayDatabase
 
 
@@ -386,6 +387,47 @@ def get_cloud_sync_status(
         "summary": summary,
         "count": len(uploads),
         "uploads": uploads,
+    }
+
+
+def export_detections_csv(
+    context: ToolContext,
+    limit: int = 1000,
+    label: str | None = None,
+    min_confidence: float = 0.0,
+    species: str | None = None,
+) -> dict[str, Any]:
+    """Export recent inference results as CSV text.
+
+    Returns a CSV-formatted string embedding the detection records so a brain
+    or downstream tool can write it to disk or display it inline.
+
+    Arguments
+    ---------
+    limit:          Maximum rows to export (1–10000, default 1000).
+    label:          Filter by detection label: "animal", "person", "vehicle".
+    min_confidence: Minimum top_confidence score (default 0.0 = all results).
+    species:        Substring match on species name (e.g. "deer").
+    """
+    safe_limit = max(1, min(int(limit), 10000))
+    csv_text = _export_detections_csv(
+        context.db,
+        limit=safe_limit,
+        label=label,
+        min_confidence=float(min_confidence),
+        species=species,
+    )
+    row_count = max(0, csv_text.count("\n") - 1)  # subtract header row
+    return {
+        "ok": True,
+        "csv": csv_text,
+        "row_count": row_count,
+        "filters": {
+            "limit": safe_limit,
+            "label": label,
+            "min_confidence": min_confidence,
+            "species": species,
+        },
     }
 
 

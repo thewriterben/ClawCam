@@ -116,6 +116,20 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "export_detections_csv",
+        "description": "Export recent inference detection results as a CSV string. Useful for downloading structured detection data for analysis or reporting.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 1000},
+                "label": {"type": "string", "enum": ["animal", "person", "vehicle"],
+                          "description": "Filter by detection category."},
+                "min_confidence": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.0},
+                "species": {"type": "string", "description": "Substring match on species name."},
+            },
+        },
+    },
+    {
         "name": "capture_now",
         "description": "Request a manual capture from a reachable ClawCam node. Approval-gated; requires cap_clawcam_camera_trap.",
         "inputSchema": {

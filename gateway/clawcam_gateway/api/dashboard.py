@@ -30,22 +30,54 @@ def render_dashboard(data: dict[str, Any]) -> str:
         for kind, count in sorted(data.get("event_counts", {}).items())
     ) or '<div class="metric"><span>Events</span><strong>0</strong></div>'
 
+    # Inference summary cards
+    detection_label_counts = data.get("detection_label_counts", {})
+    detection_species_counts = data.get("detection_species_counts", {})
+    detection_rows = "".join(
+        _detection_row(r) for r in data.get("recent_detections", [])
+    ) or '<tr><td colspan="6">No inference results yet.</td></tr>'
+
+    detection_label_cards = "".join(
+        f'<div class="metric"><span>{escape(str(label))}</span><strong>{count}</strong></div>'
+        for label, count in sorted(detection_label_counts.items())
+    ) or '<div class="metric"><span>No detections</span><strong>0</strong></div>'
+
+    top_species = sorted(detection_species_counts.items(), key=lambda x: -x[1])[:5]
+    species_rows = "".join(
+        f"<tr><td>{escape(sp)}</td><td>{cnt}</td></tr>"
+        for sp, cnt in top_species
+    ) or "<tr><td>n/a</td><td>0</td></tr>"
+
+    # Cloud sync summary
+    cloud_summary = data.get("cloud_summary", {})
+    cloud_enabled = data.get("cloud_enabled", False)
+    cloud_badge = "ENABLED" if cloud_enabled else "DISABLED"
+    cloud_badge_color = "var(--ok)" if cloud_enabled else "var(--muted)"
+
+    cloud_cards = (
+        f'<div class="metric"><span>Pending</span><strong style="color:var(--warn)">{cloud_summary.get("pending", 0)}</strong></div>'
+        f'<div class="metric"><span>Uploaded</span><strong style="color:var(--ok)">{cloud_summary.get("uploaded", 0)}</strong></div>'
+        f'<div class="metric"><span>Failed</span><strong style="color:#ef4444">{cloud_summary.get("failed", 0)}</strong></div>'
+    )
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="30">
   <title>ClawCam Gateway Dashboard</title>
   <style>
     :root {{ color-scheme: dark; --bg: #0f172a; --panel: #111827; --muted: #94a3b8; --text: #e5e7eb; --accent: #38bdf8; --ok: #22c55e; --warn: #f59e0b; }}
     body {{ margin: 0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: linear-gradient(135deg, #0f172a, #111827); color: var(--text); }}
-    header {{ padding: 2rem; border-bottom: 1px solid rgba(148, 163, 184, .25); }}
+    header {{ padding: 2rem; border-bottom: 1px solid rgba(148, 163, 184, .25); display: flex; justify-content: space-between; align-items: center; }}
     main {{ padding: 2rem; display: grid; gap: 1.5rem; }}
     h1, h2 {{ margin: 0 0 .75rem; }}
     p {{ color: var(--muted); }}
     .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; }}
     .card, table {{ background: rgba(17, 24, 39, .86); border: 1px solid rgba(148, 163, 184, .22); border-radius: 16px; box-shadow: 0 20px 40px rgba(0,0,0,.22); }}
     .card {{ padding: 1rem; }}
+    .card h2 {{ display: flex; align-items: center; gap: .5rem; }}
     .metric {{ background: rgba(15, 23, 42, .72); border: 1px solid rgba(148, 163, 184, .18); border-radius: 14px; padding: 1rem; }}
     .metric span {{ display: block; color: var(--muted); font-size: .88rem; }}
     .metric strong {{ display: block; font-size: 2rem; margin-top: .4rem; color: var(--accent); }}
@@ -55,12 +87,25 @@ def render_dashboard(data: dict[str, Any]) -> str:
     .status-ok {{ color: var(--ok); font-weight: 700; }}
     .status-warning, .status-critical {{ color: var(--warn); font-weight: 700; }}
     code {{ color: #bae6fd; }}
+    .badge {{ font-size: .75rem; font-weight: 700; padding: .2rem .5rem; border-radius: 6px; border: 1px solid; }}
+    .export-links {{ display: flex; gap: .75rem; flex-wrap: wrap; margin-top: .5rem; }}
+    .export-links a {{ color: var(--accent); font-size: .88rem; text-decoration: none; border: 1px solid rgba(56,189,248,.35); border-radius: 8px; padding: .3rem .7rem; }}
+    .export-links a:hover {{ background: rgba(56,189,248,.1); }}
+    .refresh-note {{ color: var(--muted); font-size: .8rem; }}
   </style>
 </head>
 <body>
   <header>
-    <h1>ClawCam Gateway Dashboard</h1>
-    <p>Gateway <code>{escape(str(data.get("gateway_id", "unknown")))}</code> · {escape(str(data.get("timestamp", "")))}</p>
+    <div>
+      <h1>ClawCam Gateway Dashboard</h1>
+      <p>Gateway <code>{escape(str(data.get("gateway_id", "unknown")))}</code> · {escape(str(data.get("timestamp", "")))}
+        <span class="refresh-note"> · auto-refresh 30 s</span>
+      </p>
+    </div>
+    <div class="export-links">
+      <a href="/api/v1/export/events.csv">&#x2B73; events.csv</a>
+      <a href="/api/v1/export/detections.csv">&#x2B73; detections.csv</a>
+    </div>
   </header>
   <main>
     <section class="grid">
@@ -82,6 +127,31 @@ def render_dashboard(data: dict[str, Any]) -> str:
         <thead><tr><th>Timestamp</th><th>Event</th><th>Device</th><th>Labels</th><th>Media</th><th>Trigger</th></tr></thead>
         <tbody>{event_rows}</tbody>
       </table>
+    </section>
+    <section class="card">
+      <h2>AI Inference — Recent Detections</h2>
+      <div class="grid" style="margin-bottom:1rem">{detection_label_cards}</div>
+      <table>
+        <thead><tr><th>Event</th><th>Model</th><th>Top Label</th><th>Confidence</th><th>Species</th><th>Ran At</th></tr></thead>
+        <tbody>{detection_rows}</tbody>
+      </table>
+    </section>
+    <section class="card">
+      <h2>Top Species <span style="color:var(--muted);font-size:.88rem;font-weight:400">(recent detections)</span></h2>
+      <table>
+        <thead><tr><th>Species</th><th>Detections</th></tr></thead>
+        <tbody>{species_rows}</tbody>
+      </table>
+    </section>
+    <section class="card">
+      <h2>Cloud Sync
+        <span class="badge" style="color:{cloud_badge_color};border-color:{cloud_badge_color}">{cloud_badge}</span>
+      </h2>
+      <div class="grid">{cloud_cards}</div>
+      <p style="margin-top:.75rem">
+        Failed uploads can be retried via
+        <code>POST /api/v1/cloud/retry</code>.
+      </p>
     </section>
   </main>
 </body>
@@ -119,5 +189,20 @@ def _event_row(event: dict[str, Any]) -> str:
         f"<td>{escape(labels)}</td>"
         f"<td>{escape(media)}</td>"
         f"<td>{escape(str(trigger))}</td>"
+        "</tr>"
+    )
+
+
+def _detection_row(result: dict[str, Any]) -> str:
+    conf = result.get("top_confidence")
+    conf_text = f"{conf:.2f}" if isinstance(conf, (int, float)) else "n/a"
+    return (
+        "<tr>"
+        f"<td><code>{escape(str(result.get('event_id', '')))}</code></td>"
+        f"<td>{escape(str(result.get('model_name', '')))}</td>"
+        f"<td>{escape(str(result.get('top_label', 'n/a')))}</td>"
+        f"<td>{escape(conf_text)}</td>"
+        f"<td>{escape(str(result.get('top_species', 'n/a')))}</td>"
+        f"<td>{escape(str(result.get('ran_at', '')))}</td>"
         "</tr>"
     )

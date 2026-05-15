@@ -12,12 +12,17 @@ import hashlib
 import uuid as _uuid
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from clawcam_gateway.api.dashboard import render_dashboard
 from clawcam_gateway.config import GatewayConfig
 from clawcam_gateway.inference.pipeline import InferencePipeline
+from clawcam_gateway.ingest.export import (
+    csv_filename,
+    export_detections_csv,
+    export_events_csv,
+)
 from clawcam_gateway.ingest.validation import validate_device, validate_event, validate_health
 from clawcam_gateway.mcp_server.tool_dispatch import dispatch_tool
 from clawcam_gateway.mqtt_bridge.bridge import MQTTBridge
@@ -241,6 +246,65 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             "count": len(uploads),
         }
 
+    # ── Data export (Phase 5) ────────────────────────────────────────────
+
+    @app.get("/api/v1/export/events.csv")
+    def export_events(
+        limit: int = 1000,
+        device_id: str | None = None,
+    ) -> StreamingResponse:
+        """Download recent events as a CSV file."""
+        safe_limit = max(1, min(limit, 10000))
+        csv_text = export_events_csv(db, limit=safe_limit, device_id=device_id)
+        filename = csv_filename("events")
+        return StreamingResponse(
+            iter([csv_text]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.get("/api/v1/export/detections.csv")
+    def export_detections(
+        limit: int = 1000,
+        label: str | None = None,
+        min_confidence: float = 0.0,
+        species: str | None = None,
+    ) -> StreamingResponse:
+        """Download recent inference detections as a CSV file."""
+        safe_limit = max(1, min(limit, 10000))
+        csv_text = export_detections_csv(
+            db,
+            limit=safe_limit,
+            label=label,
+            min_confidence=min_confidence,
+            species=species,
+        )
+        filename = csv_filename("detections")
+        return StreamingResponse(
+            iter([csv_text]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    # ── Cloud retry (Phase 5) ────────────────────────────────────────────
+
+    @app.post("/api/v1/cloud/retry")
+    def retry_failed_uploads(background_tasks: BackgroundTasks) -> dict[str, Any]:
+        """Re-queue all failed cloud uploads for retry in the background."""
+        failed = db.list_cloud_uploads(status="failed", limit=500)
+        for upload in failed:
+            media_path = Path(upload["media_path"])
+            background_tasks.add_task(
+                cloud_worker.queue_and_upload,
+                media_path,
+                upload.get("event_id"),
+            )
+        return {
+            "ok": True,
+            "retried": len(failed),
+            "message": f"{len(failed)} failed upload(s) re-queued for retry.",
+        }
+
     # ── Firmware OTA (Phase 3C) ───────────────────────────────────────────
 
     @app.post("/api/v1/firmware")
@@ -322,6 +386,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
                 {"name": "list_species_detections", "approval_required": False},
                 {"name": "list_firmware_builds", "approval_required": False},
                 {"name": "get_cloud_sync_status", "approval_required": False},
+                {"name": "export_detections_csv", "approval_required": False},
                 {"name": "capture_now", "approval_required": True},
                 {"name": "apply_config_patch", "approval_required": True},
                 {"name": "queue_firmware_update", "approval_required": True},
@@ -363,6 +428,19 @@ def _dashboard_payload(db: GatewayDatabase, config: GatewayConfig, limit: int = 
     for event in events:
         for classification in event.get("classifications", []):
             labels[classification.get("label", "unknown")] += 1
+
+    # Inference summary
+    recent_detections = db.list_inference_results(limit=safe_limit)
+    detection_label_counts: Counter[str] = Counter(
+        r["top_label"] for r in recent_detections if r.get("top_label")
+    )
+    detection_species_counts: Counter[str] = Counter(
+        r["top_species"] for r in recent_detections if r.get("top_species")
+    )
+
+    # Cloud summary
+    cloud_summary = db.get_cloud_upload_summary()
+
     return {
         "gateway_id": config.gateway_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -373,6 +451,11 @@ def _dashboard_payload(db: GatewayDatabase, config: GatewayConfig, limit: int = 
         "health_by_device": health_by_device,
         "event_counts": dict(event_counts),
         "label_counts": dict(labels),
+        "recent_detections": recent_detections,
+        "detection_label_counts": dict(detection_label_counts),
+        "detection_species_counts": dict(detection_species_counts),
+        "cloud_summary": cloud_summary,
+        "cloud_enabled": config.cloud_enabled,
     }
 
 
