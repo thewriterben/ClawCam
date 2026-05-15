@@ -1,0 +1,82 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs on the same branch/PR when a new commit arrives.
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gateway:
+    name: Gateway pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            fastapi \
+            pytest \
+            pytest-asyncio \
+            httpx \
+            paho-mqtt \
+            pillow \
+            jsonschema \
+            python-multipart \
+            pydantic
+
+      - name: Run gateway tests
+        env:
+          PYTHONPATH: gateway:brain/oh-ben-claw-adapter
+        run: pytest tests/gateway/ -v --tb=short
+
+      # The integration (`tests/integration/`) and firmware (`tests/firmware/`)
+      # suites currently have failures unrelated to the gateway code path
+      # (schema drift, firmware string-search refactor). They are intentionally
+      # excluded here; a follow-up PR should restore them and add a second job
+      # to this workflow. See PR #16 for the gateway test triage that
+      # established this baseline.
+
+  schemas:
+    name: JSON schema validation tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest jsonschema
+
+      - name: Run schema tests
+        run: pytest tests/schemas/ -v --tb=short
