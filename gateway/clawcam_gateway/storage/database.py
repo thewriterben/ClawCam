@@ -150,6 +150,40 @@ class GatewayDatabase:
                 CREATE INDEX IF NOT EXISTS idx_cloud_uploads_event ON cloud_uploads(event_id);
                 CREATE INDEX IF NOT EXISTS idx_cloud_uploads_status ON cloud_uploads(status);
                 CREATE INDEX IF NOT EXISTS idx_cloud_uploads_queued ON cloud_uploads(queued_at);
+
+                CREATE TABLE IF NOT EXISTS alert_rules (
+                    rule_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    label TEXT,
+                    min_confidence REAL NOT NULL DEFAULT 0.5,
+                    species_pattern TEXT,
+                    device_id TEXT,
+                    webhook_url TEXT,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_alert_rules_enabled ON alert_rules(enabled);
+
+                CREATE TABLE IF NOT EXISTS alert_events (
+                    alert_event_id TEXT PRIMARY KEY,
+                    rule_id TEXT NOT NULL,
+                    rule_name TEXT NOT NULL,
+                    event_id TEXT,
+                    device_id TEXT,
+                    top_label TEXT,
+                    top_confidence REAL,
+                    top_species TEXT,
+                    webhook_url TEXT,
+                    delivery_status TEXT NOT NULL DEFAULT 'pending',
+                    webhook_response TEXT,
+                    fired_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY(rule_id) REFERENCES alert_rules(rule_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_alert_events_rule ON alert_events(rule_id);
+                CREATE INDEX IF NOT EXISTS idx_alert_events_fired ON alert_events(fired_at);
+                CREATE INDEX IF NOT EXISTS idx_alert_events_status ON alert_events(delivery_status);
                 """
             )
 
@@ -524,6 +558,159 @@ class GatewayDatabase:
                 "SELECT status, COUNT(*) as cnt FROM cloud_uploads GROUP BY status"
             ).fetchall()
         return {row["status"]: row["cnt"] for row in rows}
+
+    # ── Alert rules ───────────────────────────────────────────────────────
+
+    def add_alert_rule(self, rule: dict[str, Any]) -> None:
+        """Insert a new alert rule row."""
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO alert_rules
+                    (rule_id, name, label, min_confidence, species_pattern,
+                     device_id, webhook_url, enabled)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    rule["rule_id"],
+                    rule["name"],
+                    rule.get("label"),
+                    float(rule.get("min_confidence", 0.5)),
+                    rule.get("species_pattern"),
+                    rule.get("device_id"),
+                    rule.get("webhook_url"),
+                    1 if rule.get("enabled", True) else 0,
+                ),
+            )
+
+    def get_alert_rule(self, rule_id: str) -> dict[str, Any] | None:
+        """Return a single alert rule by rule_id, or None."""
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT rule_id, name, label, min_confidence, species_pattern,
+                       device_id, webhook_url, enabled, created_at
+                FROM alert_rules WHERE rule_id = ?
+                """,
+                (rule_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["enabled"] = bool(d["enabled"])
+        return d
+
+    def list_alert_rules(self, enabled_only: bool = False) -> list[dict[str, Any]]:
+        """Return all alert rules, optionally filtering to enabled ones."""
+        where = "WHERE enabled = 1" if enabled_only else ""
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT rule_id, name, label, min_confidence, species_pattern,
+                       device_id, webhook_url, enabled, created_at
+                FROM alert_rules {where}
+                ORDER BY created_at DESC
+                """
+            ).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            d["enabled"] = bool(d["enabled"])
+            result.append(d)
+        return result
+
+    def update_alert_rule(self, rule_id: str, updates: dict[str, Any]) -> bool:
+        """Apply *updates* dict to an existing alert rule. Returns True if found."""
+        allowed = {"name", "label", "min_confidence", "species_pattern",
+                   "device_id", "webhook_url", "enabled"}
+        sets = []
+        params: list[Any] = []
+        for key, val in updates.items():
+            if key not in allowed:
+                continue
+            if key == "enabled":
+                val = 1 if val else 0
+            sets.append(f"{key} = ?")
+            params.append(val)
+        if not sets:
+            return False
+        params.append(rule_id)
+        with self.connect() as conn:
+            cur = conn.execute(
+                f"UPDATE alert_rules SET {', '.join(sets)} WHERE rule_id = ?",
+                params,
+            )
+        return cur.rowcount > 0
+
+    def delete_alert_rule(self, rule_id: str) -> bool:
+        """Delete an alert rule by rule_id. Returns True if a row was deleted."""
+        with self.connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM alert_rules WHERE rule_id = ?",
+                (rule_id,),
+            )
+        return cur.rowcount > 0
+
+    # ── Alert events ──────────────────────────────────────────────────────
+
+    def add_alert_event(self, event: dict[str, Any]) -> None:
+        """Persist a fired alert event row."""
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO alert_events
+                    (alert_event_id, rule_id, rule_name, event_id, device_id,
+                     top_label, top_confidence, top_species, webhook_url,
+                     delivery_status, webhook_response, fired_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event["alert_event_id"],
+                    event["rule_id"],
+                    event["rule_name"],
+                    event.get("event_id"),
+                    event.get("device_id"),
+                    event.get("top_label"),
+                    event.get("top_confidence"),
+                    event.get("top_species"),
+                    event.get("webhook_url"),
+                    event.get("delivery_status", "pending"),
+                    event.get("webhook_response"),
+                    event.get("fired_at"),
+                ),
+            )
+
+    def list_alert_events(
+        self,
+        limit: int = 25,
+        rule_id: str | None = None,
+        delivery_status: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return recent alert events with optional filtering."""
+        clauses = []
+        params: list[Any] = []
+        if rule_id:
+            clauses.append("rule_id = ?")
+            params.append(rule_id)
+        if delivery_status:
+            clauses.append("delivery_status = ?")
+            params.append(delivery_status)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT alert_event_id, rule_id, rule_name, event_id, device_id,
+                       top_label, top_confidence, top_species, webhook_url,
+                       delivery_status, webhook_response, fired_at
+                FROM alert_events
+                {where}
+                ORDER BY fired_at DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def latest_health(self, device_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:

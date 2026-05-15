@@ -32,6 +32,8 @@ class GatewayConfig:
     cloud_prefix: str = "clawcam/"       # remote key prefix
     cloud_region: str | None = None      # AWS region (S3 only)
     cloud_endpoint_url: str | None = None  # custom endpoint for MinIO / LocalStack
+    # Alerting (webhook notifications on inference results)
+    alert_webhook_url: str | None = None  # global default; rules may override per-rule
 
     @classmethod
     def from_env(cls) -> "GatewayConfig":
@@ -57,4 +59,5 @@ class GatewayConfig:
             cloud_prefix=os.getenv("CLAWCAM_CLOUD_PREFIX", "clawcam/"),
             cloud_region=os.getenv("CLAWCAM_CLOUD_REGION"),
             cloud_endpoint_url=os.getenv("CLAWCAM_CLOUD_ENDPOINT_URL"),
+            alert_webhook_url=os.getenv("CLAWCAM_ALERT_WEBHOOK_URL") or None,
         )

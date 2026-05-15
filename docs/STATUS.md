@@ -2,7 +2,7 @@
 
 This document is the source of truth for current implementation maturity. ClawCam tracks progress for **working code**, **scaffolds**, **frameworks**, and **planned features**.
 
-## Current Repository State (Phase 5 Complete)
+## Current Repository State (Phase 6 Complete)
 
 | Area                            | Status             | Notes                                                                                         |
 |---------------------------------|--------------------|-----------------------------------------------------------------------------------------------|
@@ -39,6 +39,11 @@ This document is the source of truth for current implementation maturity. ClawCa
 | Dashboard enrichment            | ✅ **Working**      | Inference summary, top species, cloud sync panels, export download links, 30 s auto-refresh. |
 | export_detections_csv MCP tool  | ✅ **Working**      | Returns CSV text inline; auto-approved; filters by label, species, confidence.               |
 | Phase 5 export tests            | ✅ **Working**      | CSV helpers, REST endpoints, cloud retry, dashboard payload/HTML, MCP tool, adapter policy.  |
+| Alert rules engine              | ✅ **Working**      | AlertRule matching (label/confidence/species/device); AlertEvaluator as BackgroundTask.       |
+| Webhook delivery                | ✅ **Working**      | deliver_webhook: stdlib urllib, 5 s timeout, never raises, records status in alert_events.    |
+| Alert REST endpoints            | ✅ **Working**      | POST/GET/PATCH/DELETE /api/v1/alert-rules; GET /api/v1/alerts with filters.                  |
+| Alert MCP tools                 | ✅ **Working**      | list_alert_rules, list_recent_alerts (auto-approved); create_alert_rule (approval-gated).    |
+| Phase 6 alert tests             | ✅ **Working**      | Rule matching, webhook, evaluator, DB CRUD, REST, tools, dispatch, stdio, adapter, config.   |
 
 Ground Rules:
 - No feature will be described as "Working" until verified with tests and reproducible steps.
@@ -133,6 +138,31 @@ Phase 4 adds off-site media archival without changing the offline-first guarante
 5. **Config**: `CLAWCAM_CLOUD_ENABLED`, `CLAWCAM_CLOUD_PROVIDER`, `CLAWCAM_CLOUD_BUCKET`,
    `CLAWCAM_CLOUD_PREFIX`, `CLAWCAM_CLOUD_REGION`, `CLAWCAM_CLOUD_ENDPOINT_URL`.
    Cloud is disabled by default — existing deployments are unaffected.
+
+## Phase 6 Complete — Alert Rules & Webhook Notifications
+
+Phase 6 adds a persistent, configurable alerting system so operators are notified in real-time when the AI detects specific animals, people, or other events:
+
+1. **AlertRule data model** (`alerts/rules.py`): each rule specifies a label filter, minimum
+   confidence, optional species substring, optional device filter, and a webhook URL. Rules are
+   stored in the `alert_rules` SQLite table and survive gateway restarts.
+2. **AlertEvaluator** (`alerts/evaluator.py`): registered as a FastAPI `BackgroundTask`
+   immediately after inference completes. Loads all enabled rules, evaluates each against the
+   fresh inference result, fires matching webhooks, and persists `alert_events` rows.
+   Never raises — failures are logged and recorded, never block the ingest path.
+3. **Webhook delivery** (`alerts/webhook.py`): pure stdlib `urllib.request` POST with
+   `application/json` body, 5-second timeout, structured return tuple
+   `(success, http_status, error)`. Zero external dependencies.
+4. **`alert_rules` and `alert_events` SQLite tables** with indexed queries for enabled rules,
+   fired events by rule, and delivery status.
+5. **REST endpoints**: `POST/GET/PATCH/DELETE /api/v1/alert-rules` (full CRUD),
+   `GET /api/v1/alerts` (fired events, filterable by rule or delivery status).
+6. **MCP tools**:
+   - `list_alert_rules` (auto-approved): returns all configured rules.
+   - `list_recent_alerts` (auto-approved): returns fired events with delivery status.
+   - `create_alert_rule` (approval-gated): persists a new rule. Brain must confirm before calling.
+7. **`CLAWCAM_ALERT_WEBHOOK_URL`** env var: global default webhook used when a rule has no
+   individual URL set. Empty/unset = no delivery (rule still fires and is recorded).
 
 ## Phase 5 Complete — Data Export, Cloud Retry, Dashboard Enrichment
 

@@ -130,6 +130,41 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "list_alert_rules",
+        "description": "Return all configured alert rules. Rules fire webhook notifications when AI detections match specified criteria (label, species, confidence threshold).",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_recent_alerts",
+        "description": "Return recent fired alert events showing which rules matched, what was detected, and whether webhook delivery succeeded.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 25},
+                "rule_id": {"type": "string", "description": "Filter to a specific rule."},
+                "delivery_status": {"type": "string", "enum": ["delivered", "failed"],
+                                    "description": "Filter by webhook delivery outcome."},
+            },
+        },
+    },
+    {
+        "name": "create_alert_rule",
+        "description": "Create a persistent alert rule that fires a webhook when the AI detects matching species, labels, or confidence. Approval-gated — permanently modifies gateway state.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+                "name": {"type": "string", "description": "Human-readable rule name."},
+                "webhook_url": {"type": "string", "description": "HTTP(S) endpoint to POST alert payload."},
+                "label": {"type": "string", "enum": ["animal", "person", "vehicle"],
+                          "description": "Restrict to this detection category. Omit for any."},
+                "min_confidence": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5},
+                "species_pattern": {"type": "string", "description": "Case-insensitive species substring (e.g. 'bear')."},
+                "device_id": {"type": "string", "description": "Only fire for this device."},
+            },
+        },
+    },
+    {
         "name": "capture_now",
         "description": "Request a manual capture from a reachable ClawCam node. Approval-gated; requires cap_clawcam_camera_trap.",
         "inputSchema": {
