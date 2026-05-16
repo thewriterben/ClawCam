@@ -30,6 +30,11 @@ from clawcam_gateway.auth import (
     hash_api_key,
 )
 from clawcam_gateway.config import GatewayConfig
+from clawcam_gateway.scheduler import (
+    ACTION_TYPES,
+    ScheduleEngine,
+    is_valid_action,
+)
 from clawcam_gateway.inference.pipeline import InferencePipeline
 from clawcam_gateway.ingest.export import (
     csv_filename,
@@ -70,6 +75,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     cloud_store = get_cloud_store(config)
     cloud_worker = CloudUploadWorker(db=db, store=cloud_store)
     alert_evaluator = AlertEvaluator(db=db, default_webhook=config.alert_webhook_url)
+    schedule_engine = ScheduleEngine(db=db)
     bridge = MQTTBridge(
         db=db,
         broker_host=config.mqtt_broker_host,
@@ -84,7 +90,11 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         if bridge is not None:
             bridge.start()
+        if config.scheduler_enabled:
+            schedule_engine.start()
         yield
+        if config.scheduler_enabled:
+            schedule_engine.stop()
         if bridge is not None:
             bridge.stop()
 
@@ -242,6 +252,114 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         if not deleted:
             raise HTTPException(status_code=404, detail=f"unknown key_id: {key_id}")
         return {"ok": True, "key_id": key_id, "deleted": True}
+
+    # ── Schedules (Phase 9) ───────────────────────────────────────────────
+
+    @app.get("/api/v1/schedules")
+    def list_schedules_endpoint(
+        deployment_id: str | None = None,
+        enabled_only: bool = False,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        scope_filter = deployment_id
+        if auth.scope != "admin":
+            scope_filter = auth.deployment_id
+        schedules = db.list_schedules(enabled_only=enabled_only, deployment_id=scope_filter)
+        return {"ok": True, "schedules": schedules, "count": len(schedules)}
+
+    @app.get("/api/v1/schedules/{schedule_id}")
+    def get_schedule_endpoint(
+        schedule_id: str, auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        schedule = db.get_schedule(schedule_id)
+        if schedule is None:
+            raise HTTPException(status_code=404, detail=f"unknown schedule: {schedule_id}")
+        if auth.scope != "admin" and schedule["deployment_id"] != auth.deployment_id:
+            raise HTTPException(status_code=403, detail="cross-deployment access denied")
+        return {"ok": True, "schedule": schedule}
+
+    @app.post("/api/v1/schedules")
+    def create_schedule_endpoint(
+        payload: Payload, auth: AuthContext = Depends(require_write),
+    ) -> dict[str, Any]:
+        import uuid as _uuid_mod
+        data = payload.data
+        if not data.get("name"):
+            raise HTTPException(status_code=400, detail="name is required")
+        action_type = data.get("action_type")
+        if not is_valid_action(action_type):
+            raise HTTPException(
+                status_code=400,
+                detail=f"action_type must be one of {list(ACTION_TYPES)}",
+            )
+        # Validate cron expr early if provided
+        cron_expr = data.get("cron_expr")
+        if cron_expr:
+            try:
+                from croniter import croniter  # type: ignore
+                if not croniter.is_valid(cron_expr):
+                    raise ValueError(f"invalid cron expression: {cron_expr}")
+            except ImportError:
+                pass
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        schedule_id = data.get("schedule_id") or f"sched-{_uuid_mod.uuid4().hex[:12]}"
+        deployment_id = data.get("deployment_id", auth.deployment_id)
+        schedule = {
+            "schedule_id": schedule_id,
+            "deployment_id": deployment_id,
+            "name": data["name"],
+            "cron_expr": cron_expr,
+            "starts_at": data.get("starts_at"),
+            "ends_at": data.get("ends_at"),
+            "action_type": action_type,
+            "action_payload": data.get("action_payload", {}),
+            "enabled": bool(data.get("enabled", True)),
+        }
+        db.add_schedule(schedule)
+        return {"ok": True, "schedule": db.get_schedule(schedule_id)}
+
+    @app.patch("/api/v1/schedules/{schedule_id}")
+    def update_schedule_endpoint(
+        schedule_id: str, payload: Payload,
+        auth: AuthContext = Depends(require_write),
+    ) -> dict[str, Any]:
+        ok = db.update_schedule(schedule_id, payload.data)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"unknown schedule: {schedule_id}")
+        return {"ok": True, "schedule": db.get_schedule(schedule_id)}
+
+    @app.delete("/api/v1/schedules/{schedule_id}")
+    def delete_schedule_endpoint(
+        schedule_id: str, auth: AuthContext = Depends(require_write),
+    ) -> dict[str, Any]:
+        ok = db.delete_schedule(schedule_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"unknown schedule: {schedule_id}")
+        return {"ok": True, "schedule_id": schedule_id, "deleted": True}
+
+    @app.post("/api/v1/schedules/{schedule_id}/run")
+    def run_schedule_now_endpoint(
+        schedule_id: str, auth: AuthContext = Depends(require_write),
+    ) -> dict[str, Any]:
+        result = schedule_engine.run_now(schedule_id)
+        return {
+            "ok": result.status == "success",
+            "schedule_id": result.schedule_id,
+            "status": result.status,
+            "detail": result.detail,
+            "error": result.error,
+        }
+
+    @app.get("/api/v1/schedule-runs")
+    def list_schedule_runs_endpoint(
+        schedule_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        safe_limit = max(1, min(limit, 500))
+        runs = db.list_schedule_runs(schedule_id=schedule_id, status=status, limit=safe_limit)
+        return {"ok": True, "runs": runs, "count": len(runs)}
 
     # ── Profiles + states (Phase 8) ───────────────────────────────────────
 

@@ -37,6 +37,10 @@ class GatewayConfig:
     # Authentication and multi-tenancy (Phase 7)
     auth_enabled: bool = False           # off by default; existing deployments unaffected
     default_deployment_id: str = "default"
+    # Schedule engine (Phase 9)
+    scheduler_enabled: bool = False      # opt-in; the engine's tick() is also driven
+                                         # synchronously by tests and admin tools
+    scheduler_tick_interval_s: int = 30
 
     @classmethod
     def from_env(cls) -> "GatewayConfig":
@@ -65,4 +69,6 @@ class GatewayConfig:
             alert_webhook_url=os.getenv("CLAWCAM_ALERT_WEBHOOK_URL") or None,
             auth_enabled=os.getenv("CLAWCAM_AUTH_ENABLED", "false").lower() == "true",
             default_deployment_id=os.getenv("CLAWCAM_DEFAULT_DEPLOYMENT", "default"),
+            scheduler_enabled=os.getenv("CLAWCAM_SCHEDULER_ENABLED", "false").lower() == "true",
+            scheduler_tick_interval_s=int(os.getenv("CLAWCAM_SCHEDULER_TICK_S", "30")),
         )

@@ -54,6 +54,8 @@ class ToolPolicy:
         "list_profiles",
         "get_device_state",
         "list_state_transitions",
+        "list_schedules",
+        "list_schedule_runs",
     }))
     always_ask: frozenset[str] = field(default_factory=lambda: frozenset({
         "capture_now",
@@ -62,6 +64,7 @@ class ToolPolicy:
         "create_alert_rule",
         "set_device_state",
         "set_deployment_state",
+        "create_schedule",
     }))
 
     def requires_approval(self, tool_name: str) -> bool:

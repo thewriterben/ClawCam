@@ -235,6 +235,41 @@ class GatewayDatabase:
                     ON state_transitions(deployment_id);
                 CREATE INDEX IF NOT EXISTS idx_state_transitions_at
                     ON state_transitions(transitioned_at);
+
+                -- Phase 9: schedule engine ----------------------------------
+                CREATE TABLE IF NOT EXISTS schedules (
+                    schedule_id TEXT PRIMARY KEY,
+                    deployment_id TEXT NOT NULL DEFAULT 'default',
+                    name TEXT NOT NULL,
+                    cron_expr TEXT,
+                    starts_at TEXT,
+                    ends_at TEXT,
+                    action_type TEXT NOT NULL,
+                    action_payload_json TEXT NOT NULL DEFAULT '{}',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    last_run_at TEXT,
+                    next_run_at TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled);
+                CREATE INDEX IF NOT EXISTS idx_schedules_next_run ON schedules(next_run_at);
+                CREATE INDEX IF NOT EXISTS idx_schedules_deployment ON schedules(deployment_id);
+
+                CREATE TABLE IF NOT EXISTS schedule_runs (
+                    run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    schedule_id TEXT NOT NULL,
+                    ran_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    status TEXT NOT NULL,
+                    detail_json TEXT NOT NULL DEFAULT '{}',
+                    error TEXT,
+                    FOREIGN KEY(schedule_id) REFERENCES schedules(schedule_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_schedule_runs_schedule
+                    ON schedule_runs(schedule_id);
+                CREATE INDEX IF NOT EXISTS idx_schedule_runs_at
+                    ON schedule_runs(ran_at);
                 """
             )
             # Idempotent column-additions for legacy tables. ADD COLUMN is the
@@ -956,6 +991,182 @@ class GatewayDatabase:
                 params,
             ).fetchall()
         return [dict(r) for r in rows]
+
+    # ── Schedules (Phase 9) ───────────────────────────────────────────────
+
+    def add_schedule(self, schedule: dict[str, Any]) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO schedules
+                    (schedule_id, deployment_id, name, cron_expr,
+                     starts_at, ends_at, action_type, action_payload_json,
+                     enabled, next_run_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    schedule["schedule_id"],
+                    schedule.get("deployment_id", "default"),
+                    schedule["name"],
+                    schedule.get("cron_expr"),
+                    schedule.get("starts_at"),
+                    schedule.get("ends_at"),
+                    schedule["action_type"],
+                    json.dumps(schedule.get("action_payload", {}), sort_keys=True),
+                    1 if schedule.get("enabled", True) else 0,
+                    schedule.get("next_run_at"),
+                ),
+            )
+
+    def get_schedule(self, schedule_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT schedule_id, deployment_id, name, cron_expr,
+                       starts_at, ends_at, action_type, action_payload_json,
+                       enabled, created_at, last_run_at, next_run_at
+                FROM schedules WHERE schedule_id = ?
+                """,
+                (schedule_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["enabled"] = bool(d["enabled"])
+        d["action_payload"] = json.loads(d.pop("action_payload_json") or "{}")
+        return d
+
+    def list_schedules(
+        self,
+        enabled_only: bool = False,
+        deployment_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if enabled_only:
+            clauses.append("enabled = 1")
+        if deployment_id:
+            clauses.append("deployment_id = ?")
+            params.append(deployment_id)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT schedule_id, deployment_id, name, cron_expr,
+                       starts_at, ends_at, action_type, action_payload_json,
+                       enabled, created_at, last_run_at, next_run_at
+                FROM schedules {where} ORDER BY created_at DESC
+                """,
+                params,
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            d = dict(row)
+            d["enabled"] = bool(d["enabled"])
+            d["action_payload"] = json.loads(d.pop("action_payload_json") or "{}")
+            out.append(d)
+        return out
+
+    def update_schedule(self, schedule_id: str, updates: dict[str, Any]) -> bool:
+        allowed = {"name", "cron_expr", "starts_at", "ends_at",
+                   "action_type", "enabled"}
+        sets: list[str] = []
+        params: list[Any] = []
+        for key, val in updates.items():
+            if key not in allowed:
+                continue
+            if key == "enabled":
+                val = 1 if val else 0
+            sets.append(f"{key} = ?")
+            params.append(val)
+        if "action_payload" in updates:
+            sets.append("action_payload_json = ?")
+            params.append(json.dumps(updates["action_payload"], sort_keys=True))
+        if not sets:
+            return False
+        params.append(schedule_id)
+        with self.connect() as conn:
+            cur = conn.execute(
+                f"UPDATE schedules SET {', '.join(sets)} WHERE schedule_id = ?",
+                params,
+            )
+        return cur.rowcount > 0
+
+    def update_schedule_run_times(
+        self,
+        schedule_id: str,
+        last_run_at: str | None,
+        next_run_at: str | None,
+    ) -> None:
+        """Best-effort update of last_run_at / next_run_at after a tick."""
+        try:
+            with self.connect() as conn:
+                conn.execute(
+                    "UPDATE schedules SET last_run_at = ?, next_run_at = ? WHERE schedule_id = ?",
+                    (last_run_at, next_run_at, schedule_id),
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def delete_schedule(self, schedule_id: str) -> bool:
+        with self.connect() as conn:
+            cur = conn.execute("DELETE FROM schedules WHERE schedule_id = ?",
+                                (schedule_id,))
+        return cur.rowcount > 0
+
+    def record_schedule_run(self, run: Any) -> None:
+        """Insert a row into schedule_runs. *run* can be a ScheduleRunResult dataclass
+        or a plain dict with the same fields."""
+        if isinstance(run, dict):
+            schedule_id = run["schedule_id"]
+            status = run["status"]
+            detail = run.get("detail", {})
+            error = run.get("error")
+        else:
+            schedule_id = run.schedule_id
+            status = run.status
+            detail = getattr(run, "detail", {}) or {}
+            error = getattr(run, "error", None)
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO schedule_runs
+                    (schedule_id, status, detail_json, error)
+                VALUES (?, ?, ?, ?)
+                """,
+                (schedule_id, status, json.dumps(detail, sort_keys=True), error),
+            )
+
+    def list_schedule_runs(
+        self,
+        schedule_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if schedule_id:
+            clauses.append("schedule_id = ?")
+            params.append(schedule_id)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        params.append(limit)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT run_id, schedule_id, status, detail_json, error, ran_at
+                FROM schedule_runs {where} ORDER BY ran_at DESC, run_id DESC LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            d = dict(row)
+            d["detail"] = json.loads(d.pop("detail_json") or "{}")
+            out.append(d)
+        return out
 
     # ── Alert rules ───────────────────────────────────────────────────────
 

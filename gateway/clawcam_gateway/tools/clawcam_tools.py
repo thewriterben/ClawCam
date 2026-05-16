@@ -634,6 +634,79 @@ def list_state_transitions(
     return {"ok": True, "count": len(transitions), "transitions": transitions}
 
 
+def list_schedules(
+    context: ToolContext,
+    deployment_id: str | None = None,
+    enabled_only: bool = False,
+) -> dict[str, Any]:
+    """List all schedules (optionally filtered to enabled and/or one deployment)."""
+    schedules = context.db.list_schedules(enabled_only=enabled_only, deployment_id=deployment_id)
+    return {"ok": True, "count": len(schedules), "schedules": schedules}
+
+
+def list_schedule_runs(
+    context: ToolContext,
+    schedule_id: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Audit log of recent schedule firings."""
+    safe_limit = max(1, min(int(limit), 500))
+    runs = context.db.list_schedule_runs(
+        schedule_id=schedule_id, status=status, limit=safe_limit)
+    return {"ok": True, "count": len(runs), "runs": runs}
+
+
+def create_schedule(
+    context: ToolContext,
+    name: str,
+    action_type: str,
+    action_payload: dict[str, Any] | None = None,
+    cron_expr: str | None = None,
+    starts_at: str | None = None,
+    ends_at: str | None = None,
+    deployment_id: str = "default",
+    approval_id: str | None = None,
+) -> dict[str, Any]:
+    """Create a scheduled action. Approval-gated — persistent state change.
+
+    Action types:
+      set_state, set_deployment_state, enable_rule, disable_rule, webhook.
+    Either cron_expr (recurring) or starts_at/ends_at (one-shot window)
+    should be provided.
+    """
+    from clawcam_gateway.scheduler import is_valid_action
+    if not name or not name.strip():
+        return {"ok": False, "error": "name is required"}
+    if not is_valid_action(action_type):
+        return {"ok": False, "error": f"invalid action_type: {action_type}"}
+    if cron_expr:
+        try:
+            from croniter import croniter  # type: ignore
+            if not croniter.is_valid(cron_expr):
+                return {"ok": False, "error": f"invalid cron expression: {cron_expr}"}
+        except ImportError:
+            return {"ok": False, "error": "croniter not installed; cannot validate cron"}
+    schedule_id = f"sched-{uuid.uuid4().hex[:12]}"
+    context.db.add_schedule({
+        "schedule_id": schedule_id,
+        "deployment_id": deployment_id,
+        "name": name.strip(),
+        "cron_expr": cron_expr,
+        "starts_at": starts_at,
+        "ends_at": ends_at,
+        "action_type": action_type,
+        "action_payload": action_payload or {},
+        "enabled": True,
+    })
+    return {
+        "ok": True,
+        "created": True,
+        "schedule": context.db.get_schedule(schedule_id),
+        "message": f"Schedule '{name}' created.",
+    }
+
+
 def _validate_config_patch(patch: dict[str, Any]) -> None:
     """Reject patches that reference protected keys."""
 

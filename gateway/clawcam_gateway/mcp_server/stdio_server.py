@@ -223,6 +223,52 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "list_schedules",
+        "description": "List configured schedules. Schedules fire actions (set_state, enable/disable rule, webhook) on cron expressions or one-shot time windows.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "deployment_id": {"type": "string"},
+                "enabled_only": {"type": "boolean", "default": False},
+            },
+        },
+    },
+    {
+        "name": "list_schedule_runs",
+        "description": "Audit log of past schedule firings, with status (success/failed) and per-run detail.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "schedule_id": {"type": "string"},
+                "status": {"type": "string", "enum": ["success", "failed"]},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50},
+            },
+        },
+    },
+    {
+        "name": "create_schedule",
+        "description": "Create a recurring or one-shot schedule that fires an action at the specified time(s). Approval-gated. Use cron_expr for recurring (UTC) or starts_at/ends_at for a time window.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["name", "action_type"],
+            "properties": {
+                "name": {"type": "string"},
+                "action_type": {
+                    "type": "string",
+                    "enum": ["set_state", "set_deployment_state",
+                             "enable_rule", "disable_rule", "webhook"],
+                },
+                "action_payload": {"type": "object"},
+                "cron_expr": {"type": "string",
+                              "description": "5-field cron expression in UTC."},
+                "starts_at": {"type": "string", "description": "ISO 8601 lower bound."},
+                "ends_at": {"type": "string", "description": "ISO 8601 upper bound."},
+                "deployment_id": {"type": "string", "default": "default"},
+                "approval_id": {"type": "string"},
+            },
+        },
+    },
+    {
         "name": "capture_now",
         "description": "Request a manual capture from a reachable ClawCam node. Approval-gated; requires cap_clawcam_camera_trap.",
         "inputSchema": {
