@@ -11,12 +11,24 @@ from typing import Any
 import hashlib
 import uuid as _uuid
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from clawcam_gateway.alerts.evaluator import AlertEvaluator
+from clawcam_gateway.api.auth_dependency import (
+    get_auth_context,
+    require_admin,
+    require_write,
+)
 from clawcam_gateway.api.dashboard import render_dashboard
+from clawcam_gateway.auth import (
+    AuthContext,
+    SCOPES,
+    auth_response_payload,
+    generate_api_key,
+    hash_api_key,
+)
 from clawcam_gateway.config import GatewayConfig
 from clawcam_gateway.inference.pipeline import InferencePipeline
 from clawcam_gateway.ingest.export import (
@@ -83,13 +95,153 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Make config, db, and the auth flag visible to FastAPI dependencies.
+    app.state.config = config
+    app.state.db = db
+    app.state.auth_enabled = config.auth_enabled
+    app.state.default_deployment_id = config.default_deployment_id
+
     @app.get("/health")
     def service_health() -> dict[str, Any]:
         return {
             "status": "ok",
             "gateway_id": config.gateway_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "auth_enabled": config.auth_enabled,
         }
+
+    # ── Deployments + API keys (Phase 7) ─────────────────────────────────
+
+    @app.get("/api/v1/deployments")
+    def list_deployments_endpoint(auth: AuthContext = Depends(get_auth_context)) -> dict[str, Any]:
+        """List deployments. Admin scope sees all; lower scopes see only their own."""
+        deployments = db.list_deployments()
+        if auth.scope != "admin":
+            deployments = [d for d in deployments if d["deployment_id"] == auth.deployment_id]
+        return {"ok": True, "deployments": deployments, "count": len(deployments)}
+
+    @app.get("/api/v1/deployments/{deployment_id}")
+    def get_deployment_endpoint(
+        deployment_id: str, auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        if auth.scope != "admin" and deployment_id != auth.deployment_id:
+            raise HTTPException(status_code=403, detail="cross-deployment access denied")
+        deployment = db.get_deployment(deployment_id)
+        if deployment is None:
+            raise HTTPException(status_code=404, detail=f"unknown deployment: {deployment_id}")
+        return {"ok": True, "deployment": deployment}
+
+    @app.post("/api/v1/deployments")
+    def create_deployment_endpoint(
+        payload: Payload, auth: AuthContext = Depends(require_admin),
+    ) -> dict[str, Any]:
+        import uuid as _uuid_mod
+        data = payload.data
+        if not data.get("name"):
+            raise HTTPException(status_code=400, detail="name is required")
+        deployment_id = data.get("deployment_id") or f"dep-{_uuid_mod.uuid4().hex[:12]}"
+        if db.get_deployment(deployment_id) is not None:
+            raise HTTPException(status_code=409, detail=f"deployment_id exists: {deployment_id}")
+        deployment = {
+            "deployment_id": deployment_id,
+            "name": data["name"],
+            "profile": data.get("profile", "general"),
+            "status": "active",
+            "description": data.get("description"),
+            "metadata": data.get("metadata", {}),
+        }
+        db.add_deployment(deployment)
+        return {"ok": True, "deployment": db.get_deployment(deployment_id)}
+
+    @app.patch("/api/v1/deployments/{deployment_id}")
+    def update_deployment_endpoint(
+        deployment_id: str, payload: Payload,
+        auth: AuthContext = Depends(require_admin),
+    ) -> dict[str, Any]:
+        updated = db.update_deployment(deployment_id, payload.data)
+        if not updated:
+            raise HTTPException(status_code=404, detail=f"unknown deployment: {deployment_id}")
+        return {"ok": True, "deployment": db.get_deployment(deployment_id)}
+
+    @app.delete("/api/v1/deployments/{deployment_id}")
+    def delete_deployment_endpoint(
+        deployment_id: str, auth: AuthContext = Depends(require_admin),
+    ) -> dict[str, Any]:
+        if deployment_id == "default":
+            raise HTTPException(status_code=400, detail="cannot delete the 'default' deployment")
+        deleted = db.delete_deployment(deployment_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"unknown deployment: {deployment_id}")
+        return {"ok": True, "deployment_id": deployment_id, "deleted": True}
+
+    @app.get("/api/v1/api-keys")
+    def list_api_keys_endpoint(
+        deployment_id: str | None = None,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """List API keys. Plaintext tokens are never returned."""
+        # Non-admins can only see their own deployment's keys.
+        scope_filter = deployment_id
+        if auth.scope != "admin":
+            scope_filter = auth.deployment_id
+        keys = db.list_api_keys(deployment_id=scope_filter)
+        return {"ok": True, "keys": keys, "count": len(keys)}
+
+    @app.post("/api/v1/api-keys")
+    def create_api_key_endpoint(
+        payload: Payload, auth: AuthContext = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """Mint a new API key. The plaintext token is returned ONCE."""
+        import uuid as _uuid_mod
+        from datetime import datetime as _dt, timezone as _tz
+        data = payload.data
+        if not data.get("name"):
+            raise HTTPException(status_code=400, detail="name is required")
+        deployment_id = data.get("deployment_id", auth.deployment_id)
+        if db.get_deployment(deployment_id) is None:
+            raise HTTPException(status_code=404, detail=f"unknown deployment: {deployment_id}")
+        scope = data.get("scope", "read")
+        if scope not in SCOPES:
+            raise HTTPException(status_code=400, detail=f"scope must be one of {list(SCOPES)}")
+        token = generate_api_key()
+        key_id = f"key-{_uuid_mod.uuid4().hex[:12]}"
+        now = _dt.now(_tz.utc).isoformat()
+        db.add_api_key({
+            "key_id": key_id,
+            "deployment_id": deployment_id,
+            "name": data["name"],
+            "key_hash": hash_api_key(token),
+            "scope": scope,
+            "enabled": True,
+            "expires_at": data.get("expires_at"),
+        })
+        return auth_response_payload(
+            key_id=key_id,
+            plaintext_key=token,
+            name=data["name"],
+            scope=scope,
+            deployment_id=deployment_id,
+            created_at=now,
+            expires_at=data.get("expires_at"),
+        )
+
+    @app.post("/api/v1/api-keys/{key_id}/revoke")
+    def revoke_api_key_endpoint(
+        key_id: str, auth: AuthContext = Depends(require_admin),
+    ) -> dict[str, Any]:
+        revoked = db.revoke_api_key(key_id)
+        if not revoked:
+            raise HTTPException(status_code=404, detail=f"unknown key_id: {key_id}")
+        return {"ok": True, "key_id": key_id, "revoked": True}
+
+    @app.delete("/api/v1/api-keys/{key_id}")
+    def delete_api_key_endpoint(
+        key_id: str, auth: AuthContext = Depends(require_admin),
+    ) -> dict[str, Any]:
+        deleted = db.delete_api_key(key_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"unknown key_id: {key_id}")
+        return {"ok": True, "key_id": key_id, "deleted": True}
 
     @app.post("/api/v1/devices")
     def register_device(payload: Payload) -> dict[str, Any]:

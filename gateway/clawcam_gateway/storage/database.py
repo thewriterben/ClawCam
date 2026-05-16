@@ -184,8 +184,60 @@ class GatewayDatabase:
                 CREATE INDEX IF NOT EXISTS idx_alert_events_rule ON alert_events(rule_id);
                 CREATE INDEX IF NOT EXISTS idx_alert_events_fired ON alert_events(fired_at);
                 CREATE INDEX IF NOT EXISTS idx_alert_events_status ON alert_events(delivery_status);
+
+                -- Phase 7: tenancy + auth -----------------------------------
+                CREATE TABLE IF NOT EXISTS deployments (
+                    deployment_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    profile TEXT NOT NULL DEFAULT 'general',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    description TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    metadata_json TEXT NOT NULL DEFAULT '{}'
+                );
+
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    key_id TEXT PRIMARY KEY,
+                    deployment_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    key_hash TEXT NOT NULL UNIQUE,
+                    scope TEXT NOT NULL DEFAULT 'read',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    last_used_at TEXT,
+                    expires_at TEXT,
+                    FOREIGN KEY(deployment_id) REFERENCES deployments(deployment_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_api_keys_deployment ON api_keys(deployment_id);
+                CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+
+                INSERT OR IGNORE INTO deployments (deployment_id, name, profile, description)
+                VALUES ('default', 'Default deployment', 'general',
+                        'Auto-created. Used when CLAWCAM_AUTH_ENABLED is unset or false.');
                 """
             )
+            # Idempotent column-additions for legacy tables. ADD COLUMN is the
+            # only schema change SQLite supports without rewriting the table,
+            # so we wrap each in a try/except — re-runs after the first one
+            # added the column will safely no-op via OperationalError.
+            self._add_column_if_missing(conn, "devices", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "events", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "pending_commands", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "inference_results", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "firmware_builds", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "cloud_uploads", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "alert_rules", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "alert_events", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "health_records", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "media", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+
+    @staticmethod
+    def _add_column_if_missing(conn, table: str, column: str, column_def: str) -> None:
+        """SQLite has no IF NOT EXISTS for ALTER TABLE — emulate it."""
+        cols = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_def}")
 
     def upsert_device(self, payload: dict[str, Any]) -> None:
         with self.connect() as conn:
@@ -558,6 +610,193 @@ class GatewayDatabase:
                 "SELECT status, COUNT(*) as cnt FROM cloud_uploads GROUP BY status"
             ).fetchall()
         return {row["status"]: row["cnt"] for row in rows}
+
+    # ── Deployments (Phase 7) ─────────────────────────────────────────────
+
+    def add_deployment(self, deployment: dict[str, Any]) -> None:
+        """Insert a new deployment row."""
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO deployments
+                    (deployment_id, name, profile, status, description, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    deployment["deployment_id"],
+                    deployment["name"],
+                    deployment.get("profile", "general"),
+                    deployment.get("status", "active"),
+                    deployment.get("description"),
+                    json.dumps(deployment.get("metadata", {}), sort_keys=True),
+                ),
+            )
+
+    def get_deployment(self, deployment_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT deployment_id, name, profile, status, description,
+                       created_at, metadata_json
+                FROM deployments WHERE deployment_id = ?
+                """,
+                (deployment_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["metadata"] = json.loads(d.pop("metadata_json") or "{}")
+        return d
+
+    def list_deployments(self, status: str | None = None) -> list[dict[str, Any]]:
+        where = "WHERE status = ?" if status else ""
+        params: tuple = (status,) if status else ()
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT deployment_id, name, profile, status, description,
+                       created_at, metadata_json
+                FROM deployments {where} ORDER BY created_at ASC
+                """,
+                params,
+            ).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            d["metadata"] = json.loads(d.pop("metadata_json") or "{}")
+            result.append(d)
+        return result
+
+    def update_deployment(self, deployment_id: str, updates: dict[str, Any]) -> bool:
+        allowed = {"name", "profile", "status", "description"}
+        sets = []
+        params: list[Any] = []
+        for key, val in updates.items():
+            if key in allowed:
+                sets.append(f"{key} = ?")
+                params.append(val)
+        if "metadata" in updates:
+            sets.append("metadata_json = ?")
+            params.append(json.dumps(updates["metadata"], sort_keys=True))
+        if not sets:
+            return False
+        params.append(deployment_id)
+        with self.connect() as conn:
+            cur = conn.execute(
+                f"UPDATE deployments SET {', '.join(sets)} WHERE deployment_id = ?",
+                params,
+            )
+        return cur.rowcount > 0
+
+    def delete_deployment(self, deployment_id: str) -> bool:
+        """Delete a deployment. Refuses to delete the 'default' deployment."""
+        if deployment_id == "default":
+            return False
+        with self.connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM deployments WHERE deployment_id = ?",
+                (deployment_id,),
+            )
+        return cur.rowcount > 0
+
+    # ── API keys (Phase 7) ────────────────────────────────────────────────
+
+    def add_api_key(self, key: dict[str, Any]) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO api_keys
+                    (key_id, deployment_id, name, key_hash, scope,
+                     enabled, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    key["key_id"],
+                    key["deployment_id"],
+                    key["name"],
+                    key["key_hash"],
+                    key.get("scope", "read"),
+                    1 if key.get("enabled", True) else 0,
+                    key.get("expires_at"),
+                ),
+            )
+
+    def get_api_key_by_hash(self, key_hash: str) -> dict[str, Any] | None:
+        """Look up an api_key by its SHA256 hash. Used by the auth middleware."""
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT key_id, deployment_id, name, scope, enabled,
+                       created_at, last_used_at, expires_at
+                FROM api_keys WHERE key_hash = ?
+                """,
+                (key_hash,),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["enabled"] = bool(d["enabled"])
+        return d
+
+    def get_api_key(self, key_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT key_id, deployment_id, name, scope, enabled,
+                       created_at, last_used_at, expires_at
+                FROM api_keys WHERE key_id = ?
+                """,
+                (key_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["enabled"] = bool(d["enabled"])
+        return d
+
+    def list_api_keys(self, deployment_id: str | None = None) -> list[dict[str, Any]]:
+        where = "WHERE deployment_id = ?" if deployment_id else ""
+        params: tuple = (deployment_id,) if deployment_id else ()
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT key_id, deployment_id, name, scope, enabled,
+                       created_at, last_used_at, expires_at
+                FROM api_keys {where} ORDER BY created_at DESC
+                """,
+                params,
+            ).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            d["enabled"] = bool(d["enabled"])
+            result.append(d)
+        return result
+
+    def touch_api_key(self, key_id: str) -> None:
+        """Update last_used_at for an api_key. Best-effort, never raises."""
+        try:
+            with self.connect() as conn:
+                conn.execute(
+                    "UPDATE api_keys SET last_used_at = datetime('now') WHERE key_id = ?",
+                    (key_id,),
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def revoke_api_key(self, key_id: str) -> bool:
+        """Mark an api_key as disabled. Returns True if a row was updated."""
+        with self.connect() as conn:
+            cur = conn.execute(
+                "UPDATE api_keys SET enabled = 0 WHERE key_id = ?",
+                (key_id,),
+            )
+        return cur.rowcount > 0
+
+    def delete_api_key(self, key_id: str) -> bool:
+        with self.connect() as conn:
+            cur = conn.execute("DELETE FROM api_keys WHERE key_id = ?", (key_id,))
+        return cur.rowcount > 0
 
     # ── Alert rules ───────────────────────────────────────────────────────
 

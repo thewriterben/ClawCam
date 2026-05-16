@@ -34,6 +34,9 @@ class GatewayConfig:
     cloud_endpoint_url: str | None = None  # custom endpoint for MinIO / LocalStack
     # Alerting (webhook notifications on inference results)
     alert_webhook_url: str | None = None  # global default; rules may override per-rule
+    # Authentication and multi-tenancy (Phase 7)
+    auth_enabled: bool = False           # off by default; existing deployments unaffected
+    default_deployment_id: str = "default"
 
     @classmethod
     def from_env(cls) -> "GatewayConfig":
@@ -60,4 +63,6 @@ class GatewayConfig:
             cloud_region=os.getenv("CLAWCAM_CLOUD_REGION"),
             cloud_endpoint_url=os.getenv("CLAWCAM_CLOUD_ENDPOINT_URL"),
             alert_webhook_url=os.getenv("CLAWCAM_ALERT_WEBHOOK_URL") or None,
+            auth_enabled=os.getenv("CLAWCAM_AUTH_ENABLED", "false").lower() == "true",
+            default_deployment_id=os.getenv("CLAWCAM_DEFAULT_DEPLOYMENT", "default"),
         )
