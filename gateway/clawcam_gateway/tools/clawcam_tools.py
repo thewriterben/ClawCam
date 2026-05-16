@@ -707,6 +707,66 @@ def create_schedule(
     }
 
 
+def list_detection_zones(
+    context: ToolContext,
+    device_id: str | None = None,
+    enabled_only: bool = False,
+) -> dict[str, Any]:
+    """List polygon detection zones, optionally scoped to a device."""
+    zones = context.db.list_detection_zones(
+        device_id=device_id, enabled_only=enabled_only,
+    )
+    return {"ok": True, "count": len(zones), "zones": zones}
+
+
+def create_detection_zone(
+    context: ToolContext,
+    device_id: str,
+    name: str,
+    polygon: list[list[float]],
+    action: str,
+    priority: int = 100,
+    approval_id: str | None = None,
+) -> dict[str, Any]:
+    """Create a polygon zone on a camera. Approval-gated (persistent state).
+
+    polygon is a list of [x, y] points in image-normalised coordinates
+    (each value 0.0-1.0). action must be one of: alert, record, ignore,
+    privacy_mask.
+    """
+    from clawcam_gateway.zones import is_valid_polygon, is_valid_zone_action
+    if not name or not name.strip():
+        return {"ok": False, "error": "name is required"}
+    if not is_valid_polygon(polygon):
+        return {
+            "ok": False,
+            "error": "polygon must be a list of >=3 [x, y] points with each coord 0-1",
+        }
+    if not is_valid_zone_action(action):
+        return {
+            "ok": False,
+            "error": f"action must be one of alert, record, ignore, privacy_mask (got {action!r})",
+        }
+    if context.db.get_device(device_id) is None:
+        return {"ok": False, "error": f"unknown device: {device_id}"}
+    zone_id = f"zone-{uuid.uuid4().hex[:12]}"
+    context.db.add_detection_zone({
+        "zone_id": zone_id,
+        "device_id": device_id,
+        "name": name.strip(),
+        "polygon": polygon,
+        "action": action,
+        "priority": int(priority),
+        "enabled": True,
+    })
+    return {
+        "ok": True,
+        "created": True,
+        "zone": context.db.get_detection_zone(zone_id),
+        "message": f"Detection zone '{name}' created on device {device_id}.",
+    }
+
+
 def _validate_config_patch(patch: dict[str, Any]) -> None:
     """Reject patches that reference protected keys."""
 

@@ -61,6 +61,21 @@ class AlertEvaluator:
             logger.warning("AlertEvaluator: could not load rules: %s", exc)
             return 0
 
+        # Phase 10: filter detections by detection-zone actions.
+        try:
+            if device_id is not None:
+                zones = self._db.list_detection_zones(
+                    device_id=device_id, enabled_only=True,
+                )
+                if zones:
+                    from clawcam_gateway.zones import apply_zones_to_result
+                    result, alerts_blocked = apply_zones_to_result(result, zones)
+                    if alerts_blocked:
+                        # Every surviving detection is in a record-only zone.
+                        return 0
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("AlertEvaluator: zone filtering failed: %s", exc)
+
         # Resolve effective state: device override > deployment default > 'normal'
         current_state = self._resolve_state(device_id)
 

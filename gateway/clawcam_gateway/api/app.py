@@ -253,6 +253,92 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"unknown key_id: {key_id}")
         return {"ok": True, "key_id": key_id, "deleted": True}
 
+    # ── Detection zones (Phase 10) ────────────────────────────────────────
+
+    @app.get("/api/v1/zones")
+    def list_zones_endpoint(
+        device_id: str | None = None,
+        deployment_id: str | None = None,
+        enabled_only: bool = False,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        scope_filter = deployment_id
+        if auth.scope != "admin":
+            scope_filter = auth.deployment_id
+        zones = db.list_detection_zones(
+            device_id=device_id, deployment_id=scope_filter,
+            enabled_only=enabled_only,
+        )
+        return {"ok": True, "zones": zones, "count": len(zones)}
+
+    @app.get("/api/v1/zones/{zone_id}")
+    def get_zone_endpoint(zone_id: str) -> dict[str, Any]:
+        zone = db.get_detection_zone(zone_id)
+        if zone is None:
+            raise HTTPException(status_code=404, detail=f"unknown zone: {zone_id}")
+        return {"ok": True, "zone": zone}
+
+    @app.post("/api/v1/zones")
+    def create_zone_endpoint(
+        payload: Payload, auth: AuthContext = Depends(require_write),
+    ) -> dict[str, Any]:
+        import uuid as _uuid_mod
+        from clawcam_gateway.zones import is_valid_polygon, is_valid_zone_action
+        data = payload.data
+        for field in ("device_id", "name", "polygon", "action"):
+            if field not in data:
+                raise HTTPException(status_code=400, detail=f"{field} is required")
+        if not is_valid_polygon(data["polygon"]):
+            raise HTTPException(
+                status_code=400,
+                detail="polygon must be a list of >=3 [x, y] points with 0 <= x,y <= 1",
+            )
+        if not is_valid_zone_action(data["action"]):
+            raise HTTPException(
+                status_code=400,
+                detail="action must be one of: alert, record, ignore, privacy_mask",
+            )
+        if db.get_device(data["device_id"]) is None:
+            raise HTTPException(status_code=404, detail=f"unknown device: {data['device_id']}")
+        zone_id = data.get("zone_id") or f"zone-{_uuid_mod.uuid4().hex[:12]}"
+        zone = {
+            "zone_id": zone_id,
+            "device_id": data["device_id"],
+            "deployment_id": data.get("deployment_id", auth.deployment_id),
+            "name": data["name"],
+            "polygon": data["polygon"],
+            "action": data["action"],
+            "priority": int(data.get("priority", 100)),
+            "enabled": bool(data.get("enabled", True)),
+        }
+        db.add_detection_zone(zone)
+        return {"ok": True, "zone": db.get_detection_zone(zone_id)}
+
+    @app.patch("/api/v1/zones/{zone_id}")
+    def update_zone_endpoint(
+        zone_id: str, payload: Payload,
+        auth: AuthContext = Depends(require_write),
+    ) -> dict[str, Any]:
+        from clawcam_gateway.zones import is_valid_polygon, is_valid_zone_action
+        updates = payload.data
+        if "polygon" in updates and not is_valid_polygon(updates["polygon"]):
+            raise HTTPException(status_code=400, detail="invalid polygon")
+        if "action" in updates and not is_valid_zone_action(updates["action"]):
+            raise HTTPException(status_code=400, detail="invalid action")
+        ok = db.update_detection_zone(zone_id, updates)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"unknown zone: {zone_id}")
+        return {"ok": True, "zone": db.get_detection_zone(zone_id)}
+
+    @app.delete("/api/v1/zones/{zone_id}")
+    def delete_zone_endpoint(
+        zone_id: str, auth: AuthContext = Depends(require_write),
+    ) -> dict[str, Any]:
+        ok = db.delete_detection_zone(zone_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"unknown zone: {zone_id}")
+        return {"ok": True, "zone_id": zone_id, "deleted": True}
+
     # ── Schedules (Phase 9) ───────────────────────────────────────────────
 
     @app.get("/api/v1/schedules")
@@ -571,6 +657,22 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         dest = config.media_dir / f"{event_id}{suffix}"
         content = await file.read()
         dest.write_bytes(content)
+
+        # Phase 10: apply privacy masks if any zones with action='privacy_mask'
+        # exist for the originating device. Done synchronously before
+        # inference because the masked frame is what gets analysed and stored.
+        try:
+            event_row = db.get_event(event_id)
+            originating_device = (event_row or {}).get("device_id")
+            if originating_device:
+                zones = db.list_detection_zones(
+                    device_id=originating_device, enabled_only=True,
+                )
+                if any(z.get("action") == "privacy_mask" for z in zones):
+                    from clawcam_gateway.zones import apply_privacy_masks
+                    apply_privacy_masks(dest, zones)
+        except Exception:  # noqa: BLE001 - never block ingest on mask errors
+            pass
 
         # Run inference in the background (non-blocking)
         background_tasks.add_task(pipeline.run, event_id, str(dest))

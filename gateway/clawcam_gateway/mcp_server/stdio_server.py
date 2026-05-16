@@ -269,6 +269,38 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "list_detection_zones",
+        "description": "List polygon detection zones for a device or across the gateway. Zones have a per-zone action: alert (default), record (no webhook), ignore (drop detection), or privacy_mask (black out the region in stored images).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "device_id": {"type": "string"},
+                "enabled_only": {"type": "boolean", "default": False},
+            },
+        },
+    },
+    {
+        "name": "create_detection_zone",
+        "description": "Create a polygon detection zone on a device. Approval-gated. Polygon is a list of [x, y] points in image-normalised coordinates (0-1). Useful for 'ignore the street, alert on the driveway' or 'black out the neighbor's window'.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["device_id", "name", "polygon", "action"],
+            "properties": {
+                "device_id": {"type": "string"},
+                "name": {"type": "string"},
+                "polygon": {
+                    "type": "array",
+                    "items": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+                    "minItems": 3,
+                },
+                "action": {"type": "string",
+                            "enum": ["alert", "record", "ignore", "privacy_mask"]},
+                "priority": {"type": "integer", "default": 100},
+                "approval_id": {"type": "string"},
+            },
+        },
+    },
+    {
         "name": "capture_now",
         "description": "Request a manual capture from a reachable ClawCam node. Approval-gated; requires cap_clawcam_camera_trap.",
         "inputSchema": {

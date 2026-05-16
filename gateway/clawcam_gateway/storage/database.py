@@ -270,6 +270,26 @@ class GatewayDatabase:
                     ON schedule_runs(schedule_id);
                 CREATE INDEX IF NOT EXISTS idx_schedule_runs_at
                     ON schedule_runs(ran_at);
+
+                -- Phase 10: detection zones + privacy masks ------------------
+                CREATE TABLE IF NOT EXISTS detection_zones (
+                    zone_id TEXT PRIMARY KEY,
+                    device_id TEXT NOT NULL,
+                    deployment_id TEXT NOT NULL DEFAULT 'default',
+                    name TEXT NOT NULL,
+                    polygon_json TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    priority INTEGER NOT NULL DEFAULT 100,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_detection_zones_device
+                    ON detection_zones(device_id);
+                CREATE INDEX IF NOT EXISTS idx_detection_zones_enabled
+                    ON detection_zones(enabled);
+                CREATE INDEX IF NOT EXISTS idx_detection_zones_deployment
+                    ON detection_zones(deployment_id);
                 """
             )
             # Idempotent column-additions for legacy tables. ADD COLUMN is the
@@ -375,6 +395,15 @@ class GatewayDatabase:
                     json.dumps(payload, sort_keys=True),
                 ),
             )
+
+    def get_event(self, event_id: str) -> dict[str, Any] | None:
+        """Return a single event by event_id, or None."""
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM events WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+        return json.loads(row["payload_json"]) if row else None
 
     def recent_events(self, limit: int = 25) -> list[dict[str, Any]]:
         with self.connect() as conn:
@@ -1167,6 +1196,112 @@ class GatewayDatabase:
             d["detail"] = json.loads(d.pop("detail_json") or "{}")
             out.append(d)
         return out
+
+    # ── Detection zones (Phase 10) ────────────────────────────────────────
+
+    def add_detection_zone(self, zone: dict[str, Any]) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO detection_zones
+                    (zone_id, device_id, deployment_id, name,
+                     polygon_json, action, priority, enabled)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    zone["zone_id"],
+                    zone["device_id"],
+                    zone.get("deployment_id", "default"),
+                    zone["name"],
+                    json.dumps(zone["polygon"], sort_keys=False),
+                    zone["action"],
+                    int(zone.get("priority", 100)),
+                    1 if zone.get("enabled", True) else 0,
+                ),
+            )
+
+    def get_detection_zone(self, zone_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT zone_id, device_id, deployment_id, name,
+                       polygon_json, action, priority, enabled, created_at
+                FROM detection_zones WHERE zone_id = ?
+                """,
+                (zone_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["enabled"] = bool(d["enabled"])
+        d["polygon"] = json.loads(d.pop("polygon_json") or "[]")
+        return d
+
+    def list_detection_zones(
+        self,
+        device_id: str | None = None,
+        deployment_id: str | None = None,
+        enabled_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if device_id:
+            clauses.append("device_id = ?")
+            params.append(device_id)
+        if deployment_id:
+            clauses.append("deployment_id = ?")
+            params.append(deployment_id)
+        if enabled_only:
+            clauses.append("enabled = 1")
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT zone_id, device_id, deployment_id, name,
+                       polygon_json, action, priority, enabled, created_at
+                FROM detection_zones {where}
+                ORDER BY priority ASC, created_at ASC
+                """,
+                params,
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            d = dict(row)
+            d["enabled"] = bool(d["enabled"])
+            d["polygon"] = json.loads(d.pop("polygon_json") or "[]")
+            out.append(d)
+        return out
+
+    def update_detection_zone(self, zone_id: str, updates: dict[str, Any]) -> bool:
+        allowed = {"name", "action", "priority", "enabled"}
+        sets: list[str] = []
+        params: list[Any] = []
+        for key, val in updates.items():
+            if key not in allowed:
+                continue
+            if key == "enabled":
+                val = 1 if val else 0
+            sets.append(f"{key} = ?")
+            params.append(val)
+        if "polygon" in updates:
+            sets.append("polygon_json = ?")
+            params.append(json.dumps(updates["polygon"], sort_keys=False))
+        if not sets:
+            return False
+        params.append(zone_id)
+        with self.connect() as conn:
+            cur = conn.execute(
+                f"UPDATE detection_zones SET {', '.join(sets)} WHERE zone_id = ?",
+                params,
+            )
+        return cur.rowcount > 0
+
+    def delete_detection_zone(self, zone_id: str) -> bool:
+        with self.connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM detection_zones WHERE zone_id = ?", (zone_id,),
+            )
+        return cur.rowcount > 0
 
     # ── Alert rules ───────────────────────────────────────────────────────
 
