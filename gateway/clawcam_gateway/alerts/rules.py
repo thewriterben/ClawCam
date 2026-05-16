@@ -44,23 +44,38 @@ class AlertRule:
     webhook_url: str | None = None
     enabled: bool = True
     created_at: str = ""
+    # Phase 8: rule fires only when the device or its deployment is in this state.
+    # None = state-agnostic (fires regardless of state).
+    required_state: str | None = None
 
     # ── Matching ──────────────────────────────────────────────────────────
 
-    def matches(self, inference_result: dict[str, Any], device_id: str | None = None) -> bool:
+    def matches(
+        self,
+        inference_result: dict[str, Any],
+        device_id: str | None = None,
+        current_state: str | None = None,
+    ) -> bool:
         """Return True if this rule fires for the given inference result dict.
 
         Args:
             inference_result: Dict from GatewayDatabase.get_inference_result or
-                              list_inference_results — keys: top_label, top_confidence,
-                              top_species, event_id.
-            device_id:        The device_id that uploaded the media (used for device filter).
+                              list_inference_results — keys: top_label,
+                              top_confidence, top_species, event_id.
+            device_id:        The device_id that uploaded the media (device filter).
+            current_state:    Current effective state of the device (or its
+                              deployment). When the rule's ``required_state``
+                              is set, the two must match for the rule to fire.
         """
         if not self.enabled:
             return False
 
         # Device filter
         if self.device_id and device_id and self.device_id != device_id:
+            return False
+
+        # State gate (Phase 8). If a state is required but unknown, do not fire.
+        if self.required_state is not None and current_state != self.required_state:
             return False
 
         # Confidence gate
@@ -94,6 +109,7 @@ class AlertRule:
             "webhook_url": self.webhook_url,
             "enabled": self.enabled,
             "created_at": self.created_at,
+            "required_state": self.required_state,
         }
 
     @classmethod
@@ -108,4 +124,5 @@ class AlertRule:
             webhook_url=d.get("webhook_url"),
             enabled=bool(d.get("enabled", True)),
             created_at=d.get("created_at", ""),
+            required_state=d.get("required_state"),
         )

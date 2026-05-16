@@ -34,6 +34,15 @@ class GatewayConfig:
     cloud_endpoint_url: str | None = None  # custom endpoint for MinIO / LocalStack
     # Alerting (webhook notifications on inference results)
     alert_webhook_url: str | None = None  # global default; rules may override per-rule
+    # Authentication and multi-tenancy (Phase 7)
+    auth_enabled: bool = False           # off by default; existing deployments unaffected
+    default_deployment_id: str = "default"
+    # Schedule engine (Phase 9)
+    scheduler_enabled: bool = False      # opt-in; the engine's tick() is also driven
+                                         # synchronously by tests and admin tools
+    scheduler_tick_interval_s: int = 30
+    # Audio pipeline (Phase 11)
+    audio_enabled: bool = True           # mock classifier always works, so on by default
 
     @classmethod
     def from_env(cls) -> "GatewayConfig":
@@ -60,4 +69,9 @@ class GatewayConfig:
             cloud_region=os.getenv("CLAWCAM_CLOUD_REGION"),
             cloud_endpoint_url=os.getenv("CLAWCAM_CLOUD_ENDPOINT_URL"),
             alert_webhook_url=os.getenv("CLAWCAM_ALERT_WEBHOOK_URL") or None,
+            auth_enabled=os.getenv("CLAWCAM_AUTH_ENABLED", "false").lower() == "true",
+            default_deployment_id=os.getenv("CLAWCAM_DEFAULT_DEPLOYMENT", "default"),
+            scheduler_enabled=os.getenv("CLAWCAM_SCHEDULER_ENABLED", "false").lower() == "true",
+            scheduler_tick_interval_s=int(os.getenv("CLAWCAM_SCHEDULER_TICK_S", "30")),
+            audio_enabled=os.getenv("CLAWCAM_AUDIO_ENABLED", "true").lower() != "false",
         )

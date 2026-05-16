@@ -165,6 +165,201 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "list_profiles",
+        "description": "List all available ClawCam device profiles (wildlife trail cam, home security, bird feeder, livestock, apiary, garden, driveway, etc.) with their per-profile defaults: detectors to run, capture cadence, audio on/off, alert priorities.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_device_state",
+        "description": "Return the profile, current state, and effective state of a device. Effective state falls back to the deployment state if the device's own state is unset.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["device_id"],
+            "properties": {"device_id": {"type": "string"}},
+        },
+    },
+    {
+        "name": "list_state_transitions",
+        "description": "Audit log of state transitions for devices and deployments. Useful for diagnosing 'why didn't my alert fire?' style questions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target_kind": {"type": "string", "enum": ["device", "deployment"]},
+                "target_id": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50},
+            },
+        },
+    },
+    {
+        "name": "set_device_state",
+        "description": "Change a device's runtime state (normal, armed, disarmed, away, vacation, feeding, maintenance). Approval-gated — affects which alert rules fire. Every transition is audit-logged.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["device_id", "state"],
+            "properties": {
+                "device_id": {"type": "string"},
+                "state": {"type": "string",
+                          "enum": ["normal", "armed", "disarmed", "away",
+                                   "vacation", "feeding", "maintenance"]},
+                "reason": {"type": "string"},
+                "approval_id": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "set_deployment_state",
+        "description": "Change an entire deployment's runtime state. All devices that haven't set their own state inherit it. Approval-gated.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["deployment_id", "state"],
+            "properties": {
+                "deployment_id": {"type": "string"},
+                "state": {"type": "string",
+                          "enum": ["normal", "armed", "disarmed", "away",
+                                   "vacation", "feeding", "maintenance"]},
+                "reason": {"type": "string"},
+                "approval_id": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "list_schedules",
+        "description": "List configured schedules. Schedules fire actions (set_state, enable/disable rule, webhook) on cron expressions or one-shot time windows.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "deployment_id": {"type": "string"},
+                "enabled_only": {"type": "boolean", "default": False},
+            },
+        },
+    },
+    {
+        "name": "list_schedule_runs",
+        "description": "Audit log of past schedule firings, with status (success/failed) and per-run detail.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "schedule_id": {"type": "string"},
+                "status": {"type": "string", "enum": ["success", "failed"]},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50},
+            },
+        },
+    },
+    {
+        "name": "create_schedule",
+        "description": "Create a recurring or one-shot schedule that fires an action at the specified time(s). Approval-gated. Use cron_expr for recurring (UTC) or starts_at/ends_at for a time window.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["name", "action_type"],
+            "properties": {
+                "name": {"type": "string"},
+                "action_type": {
+                    "type": "string",
+                    "enum": ["set_state", "set_deployment_state",
+                             "enable_rule", "disable_rule", "webhook"],
+                },
+                "action_payload": {"type": "object"},
+                "cron_expr": {"type": "string",
+                              "description": "5-field cron expression in UTC."},
+                "starts_at": {"type": "string", "description": "ISO 8601 lower bound."},
+                "ends_at": {"type": "string", "description": "ISO 8601 upper bound."},
+                "deployment_id": {"type": "string", "default": "default"},
+                "approval_id": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "list_detection_zones",
+        "description": "List polygon detection zones for a device or across the gateway. Zones have a per-zone action: alert (default), record (no webhook), ignore (drop detection), or privacy_mask (black out the region in stored images).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "device_id": {"type": "string"},
+                "enabled_only": {"type": "boolean", "default": False},
+            },
+        },
+    },
+    {
+        "name": "create_detection_zone",
+        "description": "Create a polygon detection zone on a device. Approval-gated. Polygon is a list of [x, y] points in image-normalised coordinates (0-1). Useful for 'ignore the street, alert on the driveway' or 'black out the neighbor's window'.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["device_id", "name", "polygon", "action"],
+            "properties": {
+                "device_id": {"type": "string"},
+                "name": {"type": "string"},
+                "polygon": {
+                    "type": "array",
+                    "items": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+                    "minItems": 3,
+                },
+                "action": {"type": "string",
+                            "enum": ["alert", "record", "ignore", "privacy_mask"]},
+                "priority": {"type": "integer", "default": 100},
+                "approval_id": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "list_audio_classifications",
+        "description": "List recent audio classifier hits (BirdNET bird calls, glass-break, scream, dog-bark, etc.). Each row carries label, species, confidence, and the time offset within the audio file.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "string"},
+                "label": {"type": "string"},
+                "species": {"type": "string"},
+                "min_confidence": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.0},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50},
+            },
+        },
+    },
+    {
+        "name": "get_audio_for_event",
+        "description": "Return all uploaded audio files plus their classifications for a single event.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["event_id"],
+            "properties": {"event_id": {"type": "string"}},
+        },
+    },
+    {
+        "name": "list_detectors",
+        "description": "Return the registry of detectors known to the gateway with their availability status. Useful for discovering what models are installed before configuring a detector chain.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_device_detector_chain",
+        "description": "Return the resolved detector chain for a device: per-device override (if any) or the profile defaults. This is what runs on every image uploaded from that device.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["device_id"],
+            "properties": {"device_id": {"type": "string"}},
+        },
+    },
+    {
+        "name": "get_event_inference_chain",
+        "description": "Return every inference_results row for a single event in execution order. Useful when multiple detectors run on the same image (e.g. MegaDetector + bird classifier + face recognizer).",
+        "inputSchema": {
+            "type": "object",
+            "required": ["event_id"],
+            "properties": {"event_id": {"type": "string"}},
+        },
+    },
+    {
+        "name": "set_device_detector_chain",
+        "description": "Override the detector chain for a single device. Pass null/empty chain to clear the override and revert to profile defaults. Approval-gated.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["device_id"],
+            "properties": {
+                "device_id": {"type": "string"},
+                "chain": {"type": "array", "items": {"type": "string"}},
+                "approval_id": {"type": "string"},
+            },
+        },
+    },
+    {
         "name": "capture_now",
         "description": "Request a manual capture from a reachable ClawCam node. Approval-gated; requires cap_clawcam_camera_trap.",
         "inputSchema": {

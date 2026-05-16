@@ -51,12 +51,28 @@ class ToolPolicy:
         "export_detections_csv",
         "list_alert_rules",
         "list_recent_alerts",
+        "list_profiles",
+        "get_device_state",
+        "list_state_transitions",
+        "list_schedules",
+        "list_schedule_runs",
+        "list_detection_zones",
+        "list_audio_classifications",
+        "get_audio_for_event",
+        "list_detectors",
+        "get_device_detector_chain",
+        "get_event_inference_chain",
     }))
     always_ask: frozenset[str] = field(default_factory=lambda: frozenset({
         "capture_now",
         "apply_config_patch",
         "queue_firmware_update",
         "create_alert_rule",
+        "set_device_state",
+        "set_deployment_state",
+        "create_schedule",
+        "create_detection_zone",
+        "set_device_detector_chain",
     }))
 
     def requires_approval(self, tool_name: str) -> bool:

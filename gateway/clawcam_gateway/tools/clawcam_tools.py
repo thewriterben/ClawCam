@@ -523,6 +523,346 @@ def create_alert_rule(
     }
 
 
+def list_profiles(context: ToolContext) -> dict[str, Any]:
+    """List all available device profiles with their behavioral defaults."""
+    from clawcam_gateway.profiles import PROFILES, get_profile_defaults
+    return {
+        "ok": True,
+        "count": len(PROFILES),
+        "profiles": [get_profile_defaults(p).to_dict() for p in PROFILES],
+    }
+
+
+def get_device_state(context: ToolContext, device_id: str) -> dict[str, Any]:
+    """Return the profile + state of a device, with deployment-level fallback."""
+    row = context.db.get_device_profile_state(device_id)
+    if row is None:
+        return {"ok": False, "error": f"unknown device: {device_id}", "device_id": device_id}
+    deployment_id = row.get("deployment_id") or "default"
+    deployment_state = context.db.get_deployment_state(deployment_id)
+    effective = row.get("state") or deployment_state or "normal"
+    return {
+        "ok": True,
+        "device_id": device_id,
+        "profile": row.get("profile"),
+        "state": row.get("state"),
+        "deployment_id": deployment_id,
+        "deployment_state": deployment_state,
+        "effective_state": effective,
+    }
+
+
+def set_device_state(
+    context: ToolContext,
+    device_id: str,
+    state: str,
+    reason: str | None = None,
+    approval_id: str | None = None,
+) -> dict[str, Any]:
+    """Change the runtime state of a device. Approval-gated (changes behavior).
+
+    Allowed states: normal, armed, disarmed, away, vacation, feeding, maintenance.
+    Every transition is recorded in the state_transitions audit table.
+    """
+    from clawcam_gateway.profiles import is_valid_state
+    if not is_valid_state(state):
+        return {
+            "ok": False,
+            "error": f"invalid state '{state}'; must be one of "
+                     "normal, armed, disarmed, away, vacation, feeding, maintenance",
+        }
+    ok, prev = context.db.set_device_state(
+        device_id, state,
+        transitioned_by=approval_id or "mcp_tool",
+        reason=reason,
+    )
+    if not ok:
+        return {"ok": False, "error": f"unknown device: {device_id}", "device_id": device_id}
+    return {
+        "ok": True,
+        "device_id": device_id,
+        "previous_state": prev,
+        "state": state,
+        "message": f"Device {device_id} transitioned {prev} → {state}.",
+    }
+
+
+def set_deployment_state(
+    context: ToolContext,
+    deployment_id: str,
+    state: str,
+    reason: str | None = None,
+    approval_id: str | None = None,
+) -> dict[str, Any]:
+    """Change the runtime state of an entire deployment. Approval-gated.
+
+    All devices in the deployment whose own state is unset inherit this value.
+    Useful for "arm the whole house" or "switch the apiary to maintenance".
+    """
+    from clawcam_gateway.profiles import is_valid_state
+    if not is_valid_state(state):
+        return {"ok": False, "error": f"invalid state '{state}'"}
+    ok, prev = context.db.set_deployment_state(
+        deployment_id, state,
+        transitioned_by=approval_id or "mcp_tool",
+        reason=reason,
+    )
+    if not ok:
+        return {"ok": False, "error": f"unknown deployment: {deployment_id}"}
+    return {
+        "ok": True,
+        "deployment_id": deployment_id,
+        "previous_state": prev,
+        "state": state,
+        "message": f"Deployment {deployment_id} transitioned {prev} → {state}.",
+    }
+
+
+def list_state_transitions(
+    context: ToolContext,
+    target_kind: str | None = None,
+    target_id: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Return recent state transitions for diagnostics and audit."""
+    safe_limit = max(1, min(int(limit), 500))
+    transitions = context.db.list_state_transitions(
+        target_kind=target_kind,
+        target_id=target_id,
+        limit=safe_limit,
+    )
+    return {"ok": True, "count": len(transitions), "transitions": transitions}
+
+
+def list_schedules(
+    context: ToolContext,
+    deployment_id: str | None = None,
+    enabled_only: bool = False,
+) -> dict[str, Any]:
+    """List all schedules (optionally filtered to enabled and/or one deployment)."""
+    schedules = context.db.list_schedules(enabled_only=enabled_only, deployment_id=deployment_id)
+    return {"ok": True, "count": len(schedules), "schedules": schedules}
+
+
+def list_schedule_runs(
+    context: ToolContext,
+    schedule_id: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Audit log of recent schedule firings."""
+    safe_limit = max(1, min(int(limit), 500))
+    runs = context.db.list_schedule_runs(
+        schedule_id=schedule_id, status=status, limit=safe_limit)
+    return {"ok": True, "count": len(runs), "runs": runs}
+
+
+def create_schedule(
+    context: ToolContext,
+    name: str,
+    action_type: str,
+    action_payload: dict[str, Any] | None = None,
+    cron_expr: str | None = None,
+    starts_at: str | None = None,
+    ends_at: str | None = None,
+    deployment_id: str = "default",
+    approval_id: str | None = None,
+) -> dict[str, Any]:
+    """Create a scheduled action. Approval-gated — persistent state change.
+
+    Action types:
+      set_state, set_deployment_state, enable_rule, disable_rule, webhook.
+    Either cron_expr (recurring) or starts_at/ends_at (one-shot window)
+    should be provided.
+    """
+    from clawcam_gateway.scheduler import is_valid_action
+    if not name or not name.strip():
+        return {"ok": False, "error": "name is required"}
+    if not is_valid_action(action_type):
+        return {"ok": False, "error": f"invalid action_type: {action_type}"}
+    if cron_expr:
+        try:
+            from croniter import croniter  # type: ignore
+            if not croniter.is_valid(cron_expr):
+                return {"ok": False, "error": f"invalid cron expression: {cron_expr}"}
+        except ImportError:
+            return {"ok": False, "error": "croniter not installed; cannot validate cron"}
+    schedule_id = f"sched-{uuid.uuid4().hex[:12]}"
+    context.db.add_schedule({
+        "schedule_id": schedule_id,
+        "deployment_id": deployment_id,
+        "name": name.strip(),
+        "cron_expr": cron_expr,
+        "starts_at": starts_at,
+        "ends_at": ends_at,
+        "action_type": action_type,
+        "action_payload": action_payload or {},
+        "enabled": True,
+    })
+    return {
+        "ok": True,
+        "created": True,
+        "schedule": context.db.get_schedule(schedule_id),
+        "message": f"Schedule '{name}' created.",
+    }
+
+
+def list_detection_zones(
+    context: ToolContext,
+    device_id: str | None = None,
+    enabled_only: bool = False,
+) -> dict[str, Any]:
+    """List polygon detection zones, optionally scoped to a device."""
+    zones = context.db.list_detection_zones(
+        device_id=device_id, enabled_only=enabled_only,
+    )
+    return {"ok": True, "count": len(zones), "zones": zones}
+
+
+def create_detection_zone(
+    context: ToolContext,
+    device_id: str,
+    name: str,
+    polygon: list[list[float]],
+    action: str,
+    priority: int = 100,
+    approval_id: str | None = None,
+) -> dict[str, Any]:
+    """Create a polygon zone on a camera. Approval-gated (persistent state).
+
+    polygon is a list of [x, y] points in image-normalised coordinates
+    (each value 0.0-1.0). action must be one of: alert, record, ignore,
+    privacy_mask.
+    """
+    from clawcam_gateway.zones import is_valid_polygon, is_valid_zone_action
+    if not name or not name.strip():
+        return {"ok": False, "error": "name is required"}
+    if not is_valid_polygon(polygon):
+        return {
+            "ok": False,
+            "error": "polygon must be a list of >=3 [x, y] points with each coord 0-1",
+        }
+    if not is_valid_zone_action(action):
+        return {
+            "ok": False,
+            "error": f"action must be one of alert, record, ignore, privacy_mask (got {action!r})",
+        }
+    if context.db.get_device(device_id) is None:
+        return {"ok": False, "error": f"unknown device: {device_id}"}
+    zone_id = f"zone-{uuid.uuid4().hex[:12]}"
+    context.db.add_detection_zone({
+        "zone_id": zone_id,
+        "device_id": device_id,
+        "name": name.strip(),
+        "polygon": polygon,
+        "action": action,
+        "priority": int(priority),
+        "enabled": True,
+    })
+    return {
+        "ok": True,
+        "created": True,
+        "zone": context.db.get_detection_zone(zone_id),
+        "message": f"Detection zone '{name}' created on device {device_id}.",
+    }
+
+
+def list_audio_classifications(
+    context: ToolContext,
+    event_id: str | None = None,
+    label: str | None = None,
+    species: str | None = None,
+    min_confidence: float = 0.0,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Return recent audio classifications (BirdNET / glass-break / etc.).
+
+    Audio is captured at devices with profiles that enable it (bird_feeder,
+    home_security_*, apiary). Each classifier-hit gets one row with label,
+    species, confidence, time offset within the audio file.
+    """
+    safe_limit = max(1, min(int(limit), 500))
+    results = context.db.list_audio_classifications(
+        event_id=event_id, label=label, species=species,
+        min_confidence=float(min_confidence), limit=safe_limit,
+    )
+    return {"ok": True, "count": len(results), "results": results}
+
+
+def get_audio_for_event(context: ToolContext, event_id: str) -> dict[str, Any]:
+    """Return all uploaded audio files + their classifications for *event_id*."""
+    uploads = context.db.list_audio_uploads(event_id=event_id)
+    classifications = context.db.list_audio_classifications(event_id=event_id)
+    return {
+        "ok": True,
+        "event_id": event_id,
+        "upload_count": len(uploads),
+        "uploads": uploads,
+        "classifications": classifications,
+    }
+
+
+def list_detectors(context: ToolContext) -> dict[str, Any]:
+    """Return all detectors known to the gateway's registry, with availability."""
+    from clawcam_gateway.inference.registry import get_registry
+    reg = get_registry()
+    return {
+        "ok": True,
+        "all_detectors": reg.names(),
+        "available_detectors": reg.available_names(),
+    }
+
+
+def get_device_detector_chain(context: ToolContext, device_id: str) -> dict[str, Any]:
+    """Return the detector chain that will run on uploads from *device_id*.
+
+    Resolution order: per-device override → profile defaults → mock.
+    """
+    from clawcam_gateway.inference.orchestrator import InferenceOrchestrator
+    device = context.db.get_device(device_id)
+    if device is None:
+        return {"ok": False, "error": f"unknown device: {device_id}"}
+    chain = InferenceOrchestrator(db=context.db).chain_for_device(device_id)
+    return {
+        "ok": True,
+        "device_id": device_id,
+        "profile": device.get("profile"),
+        "chain": chain,
+        "override_set": "detector_chain" in device,
+    }
+
+
+def set_device_detector_chain(
+    context: ToolContext,
+    device_id: str,
+    chain: list[str] | None = None,
+    approval_id: str | None = None,
+) -> dict[str, Any]:
+    """Set or clear a per-device detector chain override. Approval-gated.
+
+    chain=None resets to profile defaults. List must be detector names from
+    the registry (list_detectors); unknown names are stored but will be
+    silently skipped by the orchestrator at run-time.
+    """
+    if chain is not None and not isinstance(chain, list):
+        return {"ok": False, "error": "chain must be a list of detector names or null"}
+    ok = context.db.set_device_detector_chain(device_id, chain)
+    if not ok:
+        return {"ok": False, "error": f"unknown device: {device_id}"}
+    return {"ok": True, "device_id": device_id, "chain": chain}
+
+
+def get_event_inference_chain(context: ToolContext, event_id: str) -> dict[str, Any]:
+    """Return the full multi-detector chain result for a single event.
+
+    With Phase 12, each event can have multiple inference_results rows
+    (one per detector in the chain). This tool returns all of them
+    ordered by execution time.
+    """
+    results = context.db.list_inference_results_for_event(event_id)
+    return {"ok": True, "event_id": event_id, "count": len(results), "results": results}
+
+
 def _validate_config_patch(patch: dict[str, Any]) -> None:
     """Reject patches that reference protected keys."""
 

@@ -184,8 +184,184 @@ class GatewayDatabase:
                 CREATE INDEX IF NOT EXISTS idx_alert_events_rule ON alert_events(rule_id);
                 CREATE INDEX IF NOT EXISTS idx_alert_events_fired ON alert_events(fired_at);
                 CREATE INDEX IF NOT EXISTS idx_alert_events_status ON alert_events(delivery_status);
+
+                -- Phase 7: tenancy + auth -----------------------------------
+                CREATE TABLE IF NOT EXISTS deployments (
+                    deployment_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    profile TEXT NOT NULL DEFAULT 'general',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    description TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    metadata_json TEXT NOT NULL DEFAULT '{}'
+                );
+
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    key_id TEXT PRIMARY KEY,
+                    deployment_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    key_hash TEXT NOT NULL UNIQUE,
+                    scope TEXT NOT NULL DEFAULT 'read',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    last_used_at TEXT,
+                    expires_at TEXT,
+                    FOREIGN KEY(deployment_id) REFERENCES deployments(deployment_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_api_keys_deployment ON api_keys(deployment_id);
+                CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+
+                INSERT OR IGNORE INTO deployments (deployment_id, name, profile, description)
+                VALUES ('default', 'Default deployment', 'general',
+                        'Auto-created. Used when CLAWCAM_AUTH_ENABLED is unset or false.');
+
+                -- Phase 8: device profiles + state transitions audit ---------
+                CREATE TABLE IF NOT EXISTS state_transitions (
+                    transition_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    target_kind TEXT NOT NULL,        -- 'device' | 'deployment'
+                    target_id TEXT NOT NULL,
+                    deployment_id TEXT NOT NULL DEFAULT 'default',
+                    from_state TEXT,
+                    to_state TEXT NOT NULL,
+                    transitioned_by TEXT,
+                    reason TEXT,
+                    transitioned_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_state_transitions_target
+                    ON state_transitions(target_kind, target_id);
+                CREATE INDEX IF NOT EXISTS idx_state_transitions_deployment
+                    ON state_transitions(deployment_id);
+                CREATE INDEX IF NOT EXISTS idx_state_transitions_at
+                    ON state_transitions(transitioned_at);
+
+                -- Phase 9: schedule engine ----------------------------------
+                CREATE TABLE IF NOT EXISTS schedules (
+                    schedule_id TEXT PRIMARY KEY,
+                    deployment_id TEXT NOT NULL DEFAULT 'default',
+                    name TEXT NOT NULL,
+                    cron_expr TEXT,
+                    starts_at TEXT,
+                    ends_at TEXT,
+                    action_type TEXT NOT NULL,
+                    action_payload_json TEXT NOT NULL DEFAULT '{}',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    last_run_at TEXT,
+                    next_run_at TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled);
+                CREATE INDEX IF NOT EXISTS idx_schedules_next_run ON schedules(next_run_at);
+                CREATE INDEX IF NOT EXISTS idx_schedules_deployment ON schedules(deployment_id);
+
+                CREATE TABLE IF NOT EXISTS schedule_runs (
+                    run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    schedule_id TEXT NOT NULL,
+                    ran_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    status TEXT NOT NULL,
+                    detail_json TEXT NOT NULL DEFAULT '{}',
+                    error TEXT,
+                    FOREIGN KEY(schedule_id) REFERENCES schedules(schedule_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_schedule_runs_schedule
+                    ON schedule_runs(schedule_id);
+                CREATE INDEX IF NOT EXISTS idx_schedule_runs_at
+                    ON schedule_runs(ran_at);
+
+                -- Phase 10: detection zones + privacy masks ------------------
+                CREATE TABLE IF NOT EXISTS detection_zones (
+                    zone_id TEXT PRIMARY KEY,
+                    device_id TEXT NOT NULL,
+                    deployment_id TEXT NOT NULL DEFAULT 'default',
+                    name TEXT NOT NULL,
+                    polygon_json TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    priority INTEGER NOT NULL DEFAULT 100,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_detection_zones_device
+                    ON detection_zones(device_id);
+                CREATE INDEX IF NOT EXISTS idx_detection_zones_enabled
+                    ON detection_zones(enabled);
+                CREATE INDEX IF NOT EXISTS idx_detection_zones_deployment
+                    ON detection_zones(deployment_id);
+
+                -- Phase 11: audio pipeline ----------------------------------
+                CREATE TABLE IF NOT EXISTS audio_uploads (
+                    audio_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id TEXT,
+                    device_id TEXT,
+                    deployment_id TEXT NOT NULL DEFAULT 'default',
+                    path TEXT NOT NULL,
+                    duration_s REAL,
+                    sample_rate INTEGER,
+                    format TEXT,
+                    size_bytes INTEGER,
+                    sha256 TEXT,
+                    captured_at TEXT,
+                    received_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_audio_uploads_event ON audio_uploads(event_id);
+                CREATE INDEX IF NOT EXISTS idx_audio_uploads_device ON audio_uploads(device_id);
+                CREATE INDEX IF NOT EXISTS idx_audio_uploads_received ON audio_uploads(received_at);
+
+                CREATE TABLE IF NOT EXISTS audio_classifications (
+                    classification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    audio_id INTEGER NOT NULL,
+                    event_id TEXT,
+                    classifier_name TEXT NOT NULL,
+                    classifier_version TEXT NOT NULL,
+                    label TEXT NOT NULL,
+                    species TEXT,
+                    confidence REAL NOT NULL,
+                    time_offset_s REAL,
+                    duration_s REAL,
+                    ran_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY(audio_id) REFERENCES audio_uploads(audio_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_audio_class_audio ON audio_classifications(audio_id);
+                CREATE INDEX IF NOT EXISTS idx_audio_class_event ON audio_classifications(event_id);
+                CREATE INDEX IF NOT EXISTS idx_audio_class_label ON audio_classifications(label);
+                CREATE INDEX IF NOT EXISTS idx_audio_class_species ON audio_classifications(species);
                 """
             )
+            # Idempotent column-additions for legacy tables. ADD COLUMN is the
+            # only schema change SQLite supports without rewriting the table,
+            # so we wrap each in a try/except — re-runs after the first one
+            # added the column will safely no-op via OperationalError.
+            self._add_column_if_missing(conn, "devices", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "events", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "pending_commands", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "inference_results", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "firmware_builds", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "cloud_uploads", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "alert_rules", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "alert_events", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "health_records", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+            self._add_column_if_missing(conn, "media", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+
+            # Phase 8 columns
+            self._add_column_if_missing(conn, "devices", "profile", "TEXT NOT NULL DEFAULT 'general'")
+            self._add_column_if_missing(conn, "devices", "state", "TEXT NOT NULL DEFAULT 'normal'")
+            self._add_column_if_missing(conn, "deployments", "state", "TEXT NOT NULL DEFAULT 'normal'")
+            # Alert rules gain an optional state gate
+            self._add_column_if_missing(conn, "alert_rules", "required_state", "TEXT")
+            # Phase 12: per-device detector chain override
+            self._add_column_if_missing(conn, "devices", "detector_chain_json", "TEXT")
+
+    @staticmethod
+    def _add_column_if_missing(conn, table: str, column: str, column_def: str) -> None:
+        """SQLite has no IF NOT EXISTS for ALTER TABLE — emulate it."""
+        cols = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_def}")
 
     def upsert_device(self, payload: dict[str, Any]) -> None:
         with self.connect() as conn:
@@ -262,6 +438,15 @@ class GatewayDatabase:
                 ),
             )
 
+    def get_event(self, event_id: str) -> dict[str, Any] | None:
+        """Return a single event by event_id, or None."""
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM events WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+        return json.loads(row["payload_json"]) if row else None
+
     def recent_events(self, limit: int = 25) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
@@ -273,10 +458,29 @@ class GatewayDatabase:
     def get_device(self, device_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT payload_json FROM devices WHERE device_id = ?",
+                """
+                SELECT payload_json, profile, state, deployment_id,
+                       detector_chain_json
+                FROM devices WHERE device_id = ?
+                """,
                 (device_id,),
             ).fetchone()
-        return json.loads(row["payload_json"]) if row else None
+        if row is None:
+            return None
+        payload = json.loads(row["payload_json"])
+        # Merge per-column fields back into the payload so callers get a single
+        # unified dict regardless of whether the value lives in JSON or in a
+        # SQL column. JSON values win when both exist (the device's
+        # registration intent stays canonical).
+        payload.setdefault("profile", row["profile"])
+        payload.setdefault("state", row["state"])
+        payload.setdefault("deployment_id", row["deployment_id"])
+        if row["detector_chain_json"]:
+            try:
+                payload["detector_chain"] = json.loads(row["detector_chain_json"])
+            except Exception:  # noqa: BLE001
+                pass
+        return payload
 
     def list_devices(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
@@ -412,6 +616,36 @@ class GatewayDatabase:
             "top_species": row["top_species"],
             "ran_at": row["ran_at"],
         }
+
+    def list_inference_results_for_event(self, event_id: str) -> list[dict[str, Any]]:
+        """Return *every* inference_results row for an event (Phase 12 chain).
+
+        Ordered oldest-first so callers see the chain in execution order.
+        """
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT event_id, media_path, model_name, model_version,
+                       detections_json, top_label, top_confidence, top_species, ran_at
+                FROM inference_results WHERE event_id = ?
+                ORDER BY ran_at ASC, result_id ASC
+                """,
+                (event_id,),
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            out.append({
+                "event_id": row["event_id"],
+                "media_path": row["media_path"],
+                "model_name": row["model_name"],
+                "model_version": row["model_version"],
+                "detections": json.loads(row["detections_json"]),
+                "top_label": row["top_label"],
+                "top_confidence": row["top_confidence"],
+                "top_species": row["top_species"],
+                "ran_at": row["ran_at"],
+            })
+        return out
 
     def list_inference_results(
         self,
@@ -559,6 +793,751 @@ class GatewayDatabase:
             ).fetchall()
         return {row["status"]: row["cnt"] for row in rows}
 
+    # ── Deployments (Phase 7) ─────────────────────────────────────────────
+
+    def add_deployment(self, deployment: dict[str, Any]) -> None:
+        """Insert a new deployment row."""
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO deployments
+                    (deployment_id, name, profile, status, description, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    deployment["deployment_id"],
+                    deployment["name"],
+                    deployment.get("profile", "general"),
+                    deployment.get("status", "active"),
+                    deployment.get("description"),
+                    json.dumps(deployment.get("metadata", {}), sort_keys=True),
+                ),
+            )
+
+    def get_deployment(self, deployment_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT deployment_id, name, profile, status, description,
+                       created_at, metadata_json
+                FROM deployments WHERE deployment_id = ?
+                """,
+                (deployment_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["metadata"] = json.loads(d.pop("metadata_json") or "{}")
+        return d
+
+    def list_deployments(self, status: str | None = None) -> list[dict[str, Any]]:
+        where = "WHERE status = ?" if status else ""
+        params: tuple = (status,) if status else ()
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT deployment_id, name, profile, status, description,
+                       created_at, metadata_json
+                FROM deployments {where} ORDER BY created_at ASC
+                """,
+                params,
+            ).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            d["metadata"] = json.loads(d.pop("metadata_json") or "{}")
+            result.append(d)
+        return result
+
+    def update_deployment(self, deployment_id: str, updates: dict[str, Any]) -> bool:
+        allowed = {"name", "profile", "status", "description"}
+        sets = []
+        params: list[Any] = []
+        for key, val in updates.items():
+            if key in allowed:
+                sets.append(f"{key} = ?")
+                params.append(val)
+        if "metadata" in updates:
+            sets.append("metadata_json = ?")
+            params.append(json.dumps(updates["metadata"], sort_keys=True))
+        if not sets:
+            return False
+        params.append(deployment_id)
+        with self.connect() as conn:
+            cur = conn.execute(
+                f"UPDATE deployments SET {', '.join(sets)} WHERE deployment_id = ?",
+                params,
+            )
+        return cur.rowcount > 0
+
+    def delete_deployment(self, deployment_id: str) -> bool:
+        """Delete a deployment. Refuses to delete the 'default' deployment."""
+        if deployment_id == "default":
+            return False
+        with self.connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM deployments WHERE deployment_id = ?",
+                (deployment_id,),
+            )
+        return cur.rowcount > 0
+
+    # ── API keys (Phase 7) ────────────────────────────────────────────────
+
+    def add_api_key(self, key: dict[str, Any]) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO api_keys
+                    (key_id, deployment_id, name, key_hash, scope,
+                     enabled, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    key["key_id"],
+                    key["deployment_id"],
+                    key["name"],
+                    key["key_hash"],
+                    key.get("scope", "read"),
+                    1 if key.get("enabled", True) else 0,
+                    key.get("expires_at"),
+                ),
+            )
+
+    def get_api_key_by_hash(self, key_hash: str) -> dict[str, Any] | None:
+        """Look up an api_key by its SHA256 hash. Used by the auth middleware."""
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT key_id, deployment_id, name, scope, enabled,
+                       created_at, last_used_at, expires_at
+                FROM api_keys WHERE key_hash = ?
+                """,
+                (key_hash,),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["enabled"] = bool(d["enabled"])
+        return d
+
+    def get_api_key(self, key_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT key_id, deployment_id, name, scope, enabled,
+                       created_at, last_used_at, expires_at
+                FROM api_keys WHERE key_id = ?
+                """,
+                (key_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["enabled"] = bool(d["enabled"])
+        return d
+
+    def list_api_keys(self, deployment_id: str | None = None) -> list[dict[str, Any]]:
+        where = "WHERE deployment_id = ?" if deployment_id else ""
+        params: tuple = (deployment_id,) if deployment_id else ()
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT key_id, deployment_id, name, scope, enabled,
+                       created_at, last_used_at, expires_at
+                FROM api_keys {where} ORDER BY created_at DESC
+                """,
+                params,
+            ).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            d["enabled"] = bool(d["enabled"])
+            result.append(d)
+        return result
+
+    def touch_api_key(self, key_id: str) -> None:
+        """Update last_used_at for an api_key. Best-effort, never raises."""
+        try:
+            with self.connect() as conn:
+                conn.execute(
+                    "UPDATE api_keys SET last_used_at = datetime('now') WHERE key_id = ?",
+                    (key_id,),
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def revoke_api_key(self, key_id: str) -> bool:
+        """Mark an api_key as disabled. Returns True if a row was updated."""
+        with self.connect() as conn:
+            cur = conn.execute(
+                "UPDATE api_keys SET enabled = 0 WHERE key_id = ?",
+                (key_id,),
+            )
+        return cur.rowcount > 0
+
+    def delete_api_key(self, key_id: str) -> bool:
+        with self.connect() as conn:
+            cur = conn.execute("DELETE FROM api_keys WHERE key_id = ?", (key_id,))
+        return cur.rowcount > 0
+
+    # ── Device profile + state (Phase 8) ─────────────────────────────────
+
+    def get_device_profile_state(self, device_id: str) -> dict[str, Any] | None:
+        """Return ``{profile, state, deployment_id}`` for a device, or None."""
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT device_id, profile, state, deployment_id
+                FROM devices WHERE device_id = ?
+                """,
+                (device_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def set_device_profile(self, device_id: str, profile: str) -> bool:
+        with self.connect() as conn:
+            cur = conn.execute(
+                "UPDATE devices SET profile = ? WHERE device_id = ?",
+                (profile, device_id),
+            )
+        return cur.rowcount > 0
+
+    def set_device_detector_chain(
+        self, device_id: str, chain: list[str] | None,
+    ) -> bool:
+        """Set or clear (chain=None) the per-device detector chain override."""
+        with self.connect() as conn:
+            cur = conn.execute(
+                "UPDATE devices SET detector_chain_json = ? WHERE device_id = ?",
+                (json.dumps(chain) if chain is not None else None, device_id),
+            )
+        return cur.rowcount > 0
+
+    def set_device_state(
+        self,
+        device_id: str,
+        new_state: str,
+        transitioned_by: str | None = None,
+        reason: str | None = None,
+    ) -> tuple[bool, str | None]:
+        """Atomic-ish state change with audit logging.
+
+        Returns ``(success, previous_state)``. ``previous_state`` is None
+        if the device was not found.
+        """
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT state, deployment_id FROM devices WHERE device_id = ?",
+                (device_id,),
+            ).fetchone()
+            if row is None:
+                return False, None
+            prev = row["state"]
+            deployment_id = row["deployment_id"]
+            conn.execute(
+                "UPDATE devices SET state = ? WHERE device_id = ?",
+                (new_state, device_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO state_transitions
+                    (target_kind, target_id, deployment_id,
+                     from_state, to_state, transitioned_by, reason)
+                VALUES ('device', ?, ?, ?, ?, ?, ?)
+                """,
+                (device_id, deployment_id, prev, new_state, transitioned_by, reason),
+            )
+        return True, prev
+
+    def set_deployment_state(
+        self,
+        deployment_id: str,
+        new_state: str,
+        transitioned_by: str | None = None,
+        reason: str | None = None,
+    ) -> tuple[bool, str | None]:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT state FROM deployments WHERE deployment_id = ?",
+                (deployment_id,),
+            ).fetchone()
+            if row is None:
+                return False, None
+            prev = row["state"]
+            conn.execute(
+                "UPDATE deployments SET state = ? WHERE deployment_id = ?",
+                (new_state, deployment_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO state_transitions
+                    (target_kind, target_id, deployment_id,
+                     from_state, to_state, transitioned_by, reason)
+                VALUES ('deployment', ?, ?, ?, ?, ?, ?)
+                """,
+                (deployment_id, deployment_id, prev, new_state,
+                 transitioned_by, reason),
+            )
+        return True, prev
+
+    def get_deployment_state(self, deployment_id: str) -> str | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT state FROM deployments WHERE deployment_id = ?",
+                (deployment_id,),
+            ).fetchone()
+        return row["state"] if row else None
+
+    def list_state_transitions(
+        self,
+        target_kind: str | None = None,
+        target_id: str | None = None,
+        deployment_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if target_kind:
+            clauses.append("target_kind = ?")
+            params.append(target_kind)
+        if target_id:
+            clauses.append("target_id = ?")
+            params.append(target_id)
+        if deployment_id:
+            clauses.append("deployment_id = ?")
+            params.append(deployment_id)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        params.append(limit)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT transition_id, target_kind, target_id, deployment_id,
+                       from_state, to_state, transitioned_by, reason,
+                       transitioned_at
+                FROM state_transitions
+                {where}
+                ORDER BY transitioned_at DESC, transition_id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── Schedules (Phase 9) ───────────────────────────────────────────────
+
+    def add_schedule(self, schedule: dict[str, Any]) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO schedules
+                    (schedule_id, deployment_id, name, cron_expr,
+                     starts_at, ends_at, action_type, action_payload_json,
+                     enabled, next_run_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    schedule["schedule_id"],
+                    schedule.get("deployment_id", "default"),
+                    schedule["name"],
+                    schedule.get("cron_expr"),
+                    schedule.get("starts_at"),
+                    schedule.get("ends_at"),
+                    schedule["action_type"],
+                    json.dumps(schedule.get("action_payload", {}), sort_keys=True),
+                    1 if schedule.get("enabled", True) else 0,
+                    schedule.get("next_run_at"),
+                ),
+            )
+
+    def get_schedule(self, schedule_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT schedule_id, deployment_id, name, cron_expr,
+                       starts_at, ends_at, action_type, action_payload_json,
+                       enabled, created_at, last_run_at, next_run_at
+                FROM schedules WHERE schedule_id = ?
+                """,
+                (schedule_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["enabled"] = bool(d["enabled"])
+        d["action_payload"] = json.loads(d.pop("action_payload_json") or "{}")
+        return d
+
+    def list_schedules(
+        self,
+        enabled_only: bool = False,
+        deployment_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if enabled_only:
+            clauses.append("enabled = 1")
+        if deployment_id:
+            clauses.append("deployment_id = ?")
+            params.append(deployment_id)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT schedule_id, deployment_id, name, cron_expr,
+                       starts_at, ends_at, action_type, action_payload_json,
+                       enabled, created_at, last_run_at, next_run_at
+                FROM schedules {where} ORDER BY created_at DESC
+                """,
+                params,
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            d = dict(row)
+            d["enabled"] = bool(d["enabled"])
+            d["action_payload"] = json.loads(d.pop("action_payload_json") or "{}")
+            out.append(d)
+        return out
+
+    def update_schedule(self, schedule_id: str, updates: dict[str, Any]) -> bool:
+        allowed = {"name", "cron_expr", "starts_at", "ends_at",
+                   "action_type", "enabled"}
+        sets: list[str] = []
+        params: list[Any] = []
+        for key, val in updates.items():
+            if key not in allowed:
+                continue
+            if key == "enabled":
+                val = 1 if val else 0
+            sets.append(f"{key} = ?")
+            params.append(val)
+        if "action_payload" in updates:
+            sets.append("action_payload_json = ?")
+            params.append(json.dumps(updates["action_payload"], sort_keys=True))
+        if not sets:
+            return False
+        params.append(schedule_id)
+        with self.connect() as conn:
+            cur = conn.execute(
+                f"UPDATE schedules SET {', '.join(sets)} WHERE schedule_id = ?",
+                params,
+            )
+        return cur.rowcount > 0
+
+    def update_schedule_run_times(
+        self,
+        schedule_id: str,
+        last_run_at: str | None,
+        next_run_at: str | None,
+    ) -> None:
+        """Best-effort update of last_run_at / next_run_at after a tick."""
+        try:
+            with self.connect() as conn:
+                conn.execute(
+                    "UPDATE schedules SET last_run_at = ?, next_run_at = ? WHERE schedule_id = ?",
+                    (last_run_at, next_run_at, schedule_id),
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def delete_schedule(self, schedule_id: str) -> bool:
+        with self.connect() as conn:
+            cur = conn.execute("DELETE FROM schedules WHERE schedule_id = ?",
+                                (schedule_id,))
+        return cur.rowcount > 0
+
+    def record_schedule_run(self, run: Any) -> None:
+        """Insert a row into schedule_runs. *run* can be a ScheduleRunResult dataclass
+        or a plain dict with the same fields."""
+        if isinstance(run, dict):
+            schedule_id = run["schedule_id"]
+            status = run["status"]
+            detail = run.get("detail", {})
+            error = run.get("error")
+        else:
+            schedule_id = run.schedule_id
+            status = run.status
+            detail = getattr(run, "detail", {}) or {}
+            error = getattr(run, "error", None)
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO schedule_runs
+                    (schedule_id, status, detail_json, error)
+                VALUES (?, ?, ?, ?)
+                """,
+                (schedule_id, status, json.dumps(detail, sort_keys=True), error),
+            )
+
+    def list_schedule_runs(
+        self,
+        schedule_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if schedule_id:
+            clauses.append("schedule_id = ?")
+            params.append(schedule_id)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        params.append(limit)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT run_id, schedule_id, status, detail_json, error, ran_at
+                FROM schedule_runs {where} ORDER BY ran_at DESC, run_id DESC LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            d = dict(row)
+            d["detail"] = json.loads(d.pop("detail_json") or "{}")
+            out.append(d)
+        return out
+
+    # ── Detection zones (Phase 10) ────────────────────────────────────────
+
+    def add_detection_zone(self, zone: dict[str, Any]) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO detection_zones
+                    (zone_id, device_id, deployment_id, name,
+                     polygon_json, action, priority, enabled)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    zone["zone_id"],
+                    zone["device_id"],
+                    zone.get("deployment_id", "default"),
+                    zone["name"],
+                    json.dumps(zone["polygon"], sort_keys=False),
+                    zone["action"],
+                    int(zone.get("priority", 100)),
+                    1 if zone.get("enabled", True) else 0,
+                ),
+            )
+
+    def get_detection_zone(self, zone_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT zone_id, device_id, deployment_id, name,
+                       polygon_json, action, priority, enabled, created_at
+                FROM detection_zones WHERE zone_id = ?
+                """,
+                (zone_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["enabled"] = bool(d["enabled"])
+        d["polygon"] = json.loads(d.pop("polygon_json") or "[]")
+        return d
+
+    def list_detection_zones(
+        self,
+        device_id: str | None = None,
+        deployment_id: str | None = None,
+        enabled_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if device_id:
+            clauses.append("device_id = ?")
+            params.append(device_id)
+        if deployment_id:
+            clauses.append("deployment_id = ?")
+            params.append(deployment_id)
+        if enabled_only:
+            clauses.append("enabled = 1")
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT zone_id, device_id, deployment_id, name,
+                       polygon_json, action, priority, enabled, created_at
+                FROM detection_zones {where}
+                ORDER BY priority ASC, created_at ASC
+                """,
+                params,
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            d = dict(row)
+            d["enabled"] = bool(d["enabled"])
+            d["polygon"] = json.loads(d.pop("polygon_json") or "[]")
+            out.append(d)
+        return out
+
+    def update_detection_zone(self, zone_id: str, updates: dict[str, Any]) -> bool:
+        allowed = {"name", "action", "priority", "enabled"}
+        sets: list[str] = []
+        params: list[Any] = []
+        for key, val in updates.items():
+            if key not in allowed:
+                continue
+            if key == "enabled":
+                val = 1 if val else 0
+            sets.append(f"{key} = ?")
+            params.append(val)
+        if "polygon" in updates:
+            sets.append("polygon_json = ?")
+            params.append(json.dumps(updates["polygon"], sort_keys=False))
+        if not sets:
+            return False
+        params.append(zone_id)
+        with self.connect() as conn:
+            cur = conn.execute(
+                f"UPDATE detection_zones SET {', '.join(sets)} WHERE zone_id = ?",
+                params,
+            )
+        return cur.rowcount > 0
+
+    def delete_detection_zone(self, zone_id: str) -> bool:
+        with self.connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM detection_zones WHERE zone_id = ?", (zone_id,),
+            )
+        return cur.rowcount > 0
+
+    # ── Audio pipeline (Phase 11) ─────────────────────────────────────────
+
+    def add_audio_upload(self, audio: dict[str, Any]) -> int:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO audio_uploads
+                    (event_id, device_id, deployment_id, path,
+                     duration_s, sample_rate, format, size_bytes, sha256,
+                     captured_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    audio.get("event_id"),
+                    audio.get("device_id"),
+                    audio.get("deployment_id", "default"),
+                    audio["path"],
+                    audio.get("duration_s"),
+                    audio.get("sample_rate"),
+                    audio.get("format"),
+                    audio.get("size_bytes"),
+                    audio.get("sha256"),
+                    audio.get("captured_at"),
+                ),
+            )
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    def get_audio_upload(self, audio_id: int) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT audio_id, event_id, device_id, deployment_id, path,
+                       duration_s, sample_rate, format, size_bytes, sha256,
+                       captured_at, received_at
+                FROM audio_uploads WHERE audio_id = ?
+                """,
+                (audio_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_audio_uploads(
+        self,
+        event_id: str | None = None,
+        device_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if event_id:
+            clauses.append("event_id = ?")
+            params.append(event_id)
+        if device_id:
+            clauses.append("device_id = ?")
+            params.append(device_id)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        params.append(limit)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT audio_id, event_id, device_id, deployment_id, path,
+                       duration_s, sample_rate, format, size_bytes, sha256,
+                       captured_at, received_at
+                FROM audio_uploads {where}
+                ORDER BY received_at DESC, audio_id DESC LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_audio_classification(self, classification: dict[str, Any]) -> int:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO audio_classifications
+                    (audio_id, event_id, classifier_name, classifier_version,
+                     label, species, confidence, time_offset_s, duration_s)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    classification["audio_id"],
+                    classification.get("event_id"),
+                    classification["classifier_name"],
+                    classification["classifier_version"],
+                    classification["label"],
+                    classification.get("species"),
+                    float(classification["confidence"]),
+                    classification.get("time_offset_s"),
+                    classification.get("duration_s"),
+                ),
+            )
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    def list_audio_classifications(
+        self,
+        audio_id: int | None = None,
+        event_id: str | None = None,
+        label: str | None = None,
+        species: str | None = None,
+        min_confidence: float = 0.0,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if audio_id is not None:
+            clauses.append("audio_id = ?")
+            params.append(audio_id)
+        if event_id:
+            clauses.append("event_id = ?")
+            params.append(event_id)
+        if label:
+            clauses.append("label = ?")
+            params.append(label)
+        if species:
+            clauses.append("species LIKE ?")
+            params.append(f"%{species}%")
+        if min_confidence > 0:
+            clauses.append("confidence >= ?")
+            params.append(min_confidence)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        params.append(limit)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT classification_id, audio_id, event_id, classifier_name,
+                       classifier_version, label, species, confidence,
+                       time_offset_s, duration_s, ran_at
+                FROM audio_classifications {where}
+                ORDER BY ran_at DESC, classification_id DESC LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     # ── Alert rules ───────────────────────────────────────────────────────
 
     def add_alert_rule(self, rule: dict[str, Any]) -> None:
@@ -568,8 +1547,8 @@ class GatewayDatabase:
                 """
                 INSERT INTO alert_rules
                     (rule_id, name, label, min_confidence, species_pattern,
-                     device_id, webhook_url, enabled)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     device_id, webhook_url, enabled, required_state)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     rule["rule_id"],
@@ -580,6 +1559,7 @@ class GatewayDatabase:
                     rule.get("device_id"),
                     rule.get("webhook_url"),
                     1 if rule.get("enabled", True) else 0,
+                    rule.get("required_state"),
                 ),
             )
 
@@ -589,7 +1569,7 @@ class GatewayDatabase:
             row = conn.execute(
                 """
                 SELECT rule_id, name, label, min_confidence, species_pattern,
-                       device_id, webhook_url, enabled, created_at
+                       device_id, webhook_url, enabled, created_at, required_state
                 FROM alert_rules WHERE rule_id = ?
                 """,
                 (rule_id,),
@@ -607,7 +1587,7 @@ class GatewayDatabase:
             rows = conn.execute(
                 f"""
                 SELECT rule_id, name, label, min_confidence, species_pattern,
-                       device_id, webhook_url, enabled, created_at
+                       device_id, webhook_url, enabled, created_at, required_state
                 FROM alert_rules {where}
                 ORDER BY created_at DESC
                 """
@@ -622,7 +1602,7 @@ class GatewayDatabase:
     def update_alert_rule(self, rule_id: str, updates: dict[str, Any]) -> bool:
         """Apply *updates* dict to an existing alert rule. Returns True if found."""
         allowed = {"name", "label", "min_confidence", "species_pattern",
-                   "device_id", "webhook_url", "enabled"}
+                   "device_id", "webhook_url", "enabled", "required_state"}
         sets = []
         params: list[Any] = []
         for key, val in updates.items():
