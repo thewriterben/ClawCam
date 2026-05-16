@@ -165,6 +165,64 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "list_profiles",
+        "description": "List all available ClawCam device profiles (wildlife trail cam, home security, bird feeder, livestock, apiary, garden, driveway, etc.) with their per-profile defaults: detectors to run, capture cadence, audio on/off, alert priorities.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_device_state",
+        "description": "Return the profile, current state, and effective state of a device. Effective state falls back to the deployment state if the device's own state is unset.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["device_id"],
+            "properties": {"device_id": {"type": "string"}},
+        },
+    },
+    {
+        "name": "list_state_transitions",
+        "description": "Audit log of state transitions for devices and deployments. Useful for diagnosing 'why didn't my alert fire?' style questions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target_kind": {"type": "string", "enum": ["device", "deployment"]},
+                "target_id": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50},
+            },
+        },
+    },
+    {
+        "name": "set_device_state",
+        "description": "Change a device's runtime state (normal, armed, disarmed, away, vacation, feeding, maintenance). Approval-gated — affects which alert rules fire. Every transition is audit-logged.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["device_id", "state"],
+            "properties": {
+                "device_id": {"type": "string"},
+                "state": {"type": "string",
+                          "enum": ["normal", "armed", "disarmed", "away",
+                                   "vacation", "feeding", "maintenance"]},
+                "reason": {"type": "string"},
+                "approval_id": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "set_deployment_state",
+        "description": "Change an entire deployment's runtime state. All devices that haven't set their own state inherit it. Approval-gated.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["deployment_id", "state"],
+            "properties": {
+                "deployment_id": {"type": "string"},
+                "state": {"type": "string",
+                          "enum": ["normal", "armed", "disarmed", "away",
+                                   "vacation", "feeding", "maintenance"]},
+                "reason": {"type": "string"},
+                "approval_id": {"type": "string"},
+            },
+        },
+    },
+    {
         "name": "capture_now",
         "description": "Request a manual capture from a reachable ClawCam node. Approval-gated; requires cap_clawcam_camera_trap.",
         "inputSchema": {

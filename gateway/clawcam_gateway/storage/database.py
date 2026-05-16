@@ -215,6 +215,26 @@ class GatewayDatabase:
                 INSERT OR IGNORE INTO deployments (deployment_id, name, profile, description)
                 VALUES ('default', 'Default deployment', 'general',
                         'Auto-created. Used when CLAWCAM_AUTH_ENABLED is unset or false.');
+
+                -- Phase 8: device profiles + state transitions audit ---------
+                CREATE TABLE IF NOT EXISTS state_transitions (
+                    transition_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    target_kind TEXT NOT NULL,        -- 'device' | 'deployment'
+                    target_id TEXT NOT NULL,
+                    deployment_id TEXT NOT NULL DEFAULT 'default',
+                    from_state TEXT,
+                    to_state TEXT NOT NULL,
+                    transitioned_by TEXT,
+                    reason TEXT,
+                    transitioned_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_state_transitions_target
+                    ON state_transitions(target_kind, target_id);
+                CREATE INDEX IF NOT EXISTS idx_state_transitions_deployment
+                    ON state_transitions(deployment_id);
+                CREATE INDEX IF NOT EXISTS idx_state_transitions_at
+                    ON state_transitions(transitioned_at);
                 """
             )
             # Idempotent column-additions for legacy tables. ADD COLUMN is the
@@ -231,6 +251,13 @@ class GatewayDatabase:
             self._add_column_if_missing(conn, "alert_events", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
             self._add_column_if_missing(conn, "health_records", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
             self._add_column_if_missing(conn, "media", "deployment_id", "TEXT NOT NULL DEFAULT 'default'")
+
+            # Phase 8 columns
+            self._add_column_if_missing(conn, "devices", "profile", "TEXT NOT NULL DEFAULT 'general'")
+            self._add_column_if_missing(conn, "devices", "state", "TEXT NOT NULL DEFAULT 'normal'")
+            self._add_column_if_missing(conn, "deployments", "state", "TEXT NOT NULL DEFAULT 'normal'")
+            # Alert rules gain an optional state gate
+            self._add_column_if_missing(conn, "alert_rules", "required_state", "TEXT")
 
     @staticmethod
     def _add_column_if_missing(conn, table: str, column: str, column_def: str) -> None:
@@ -798,6 +825,138 @@ class GatewayDatabase:
             cur = conn.execute("DELETE FROM api_keys WHERE key_id = ?", (key_id,))
         return cur.rowcount > 0
 
+    # ── Device profile + state (Phase 8) ─────────────────────────────────
+
+    def get_device_profile_state(self, device_id: str) -> dict[str, Any] | None:
+        """Return ``{profile, state, deployment_id}`` for a device, or None."""
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT device_id, profile, state, deployment_id
+                FROM devices WHERE device_id = ?
+                """,
+                (device_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def set_device_profile(self, device_id: str, profile: str) -> bool:
+        with self.connect() as conn:
+            cur = conn.execute(
+                "UPDATE devices SET profile = ? WHERE device_id = ?",
+                (profile, device_id),
+            )
+        return cur.rowcount > 0
+
+    def set_device_state(
+        self,
+        device_id: str,
+        new_state: str,
+        transitioned_by: str | None = None,
+        reason: str | None = None,
+    ) -> tuple[bool, str | None]:
+        """Atomic-ish state change with audit logging.
+
+        Returns ``(success, previous_state)``. ``previous_state`` is None
+        if the device was not found.
+        """
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT state, deployment_id FROM devices WHERE device_id = ?",
+                (device_id,),
+            ).fetchone()
+            if row is None:
+                return False, None
+            prev = row["state"]
+            deployment_id = row["deployment_id"]
+            conn.execute(
+                "UPDATE devices SET state = ? WHERE device_id = ?",
+                (new_state, device_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO state_transitions
+                    (target_kind, target_id, deployment_id,
+                     from_state, to_state, transitioned_by, reason)
+                VALUES ('device', ?, ?, ?, ?, ?, ?)
+                """,
+                (device_id, deployment_id, prev, new_state, transitioned_by, reason),
+            )
+        return True, prev
+
+    def set_deployment_state(
+        self,
+        deployment_id: str,
+        new_state: str,
+        transitioned_by: str | None = None,
+        reason: str | None = None,
+    ) -> tuple[bool, str | None]:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT state FROM deployments WHERE deployment_id = ?",
+                (deployment_id,),
+            ).fetchone()
+            if row is None:
+                return False, None
+            prev = row["state"]
+            conn.execute(
+                "UPDATE deployments SET state = ? WHERE deployment_id = ?",
+                (new_state, deployment_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO state_transitions
+                    (target_kind, target_id, deployment_id,
+                     from_state, to_state, transitioned_by, reason)
+                VALUES ('deployment', ?, ?, ?, ?, ?, ?)
+                """,
+                (deployment_id, deployment_id, prev, new_state,
+                 transitioned_by, reason),
+            )
+        return True, prev
+
+    def get_deployment_state(self, deployment_id: str) -> str | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT state FROM deployments WHERE deployment_id = ?",
+                (deployment_id,),
+            ).fetchone()
+        return row["state"] if row else None
+
+    def list_state_transitions(
+        self,
+        target_kind: str | None = None,
+        target_id: str | None = None,
+        deployment_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if target_kind:
+            clauses.append("target_kind = ?")
+            params.append(target_kind)
+        if target_id:
+            clauses.append("target_id = ?")
+            params.append(target_id)
+        if deployment_id:
+            clauses.append("deployment_id = ?")
+            params.append(deployment_id)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        params.append(limit)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT transition_id, target_kind, target_id, deployment_id,
+                       from_state, to_state, transitioned_by, reason,
+                       transitioned_at
+                FROM state_transitions
+                {where}
+                ORDER BY transitioned_at DESC, transition_id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     # ── Alert rules ───────────────────────────────────────────────────────
 
     def add_alert_rule(self, rule: dict[str, Any]) -> None:
@@ -807,8 +966,8 @@ class GatewayDatabase:
                 """
                 INSERT INTO alert_rules
                     (rule_id, name, label, min_confidence, species_pattern,
-                     device_id, webhook_url, enabled)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     device_id, webhook_url, enabled, required_state)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     rule["rule_id"],
@@ -819,6 +978,7 @@ class GatewayDatabase:
                     rule.get("device_id"),
                     rule.get("webhook_url"),
                     1 if rule.get("enabled", True) else 0,
+                    rule.get("required_state"),
                 ),
             )
 
@@ -828,7 +988,7 @@ class GatewayDatabase:
             row = conn.execute(
                 """
                 SELECT rule_id, name, label, min_confidence, species_pattern,
-                       device_id, webhook_url, enabled, created_at
+                       device_id, webhook_url, enabled, created_at, required_state
                 FROM alert_rules WHERE rule_id = ?
                 """,
                 (rule_id,),
@@ -846,7 +1006,7 @@ class GatewayDatabase:
             rows = conn.execute(
                 f"""
                 SELECT rule_id, name, label, min_confidence, species_pattern,
-                       device_id, webhook_url, enabled, created_at
+                       device_id, webhook_url, enabled, created_at, required_state
                 FROM alert_rules {where}
                 ORDER BY created_at DESC
                 """
@@ -861,7 +1021,7 @@ class GatewayDatabase:
     def update_alert_rule(self, rule_id: str, updates: dict[str, Any]) -> bool:
         """Apply *updates* dict to an existing alert rule. Returns True if found."""
         allowed = {"name", "label", "min_confidence", "species_pattern",
-                   "device_id", "webhook_url", "enabled"}
+                   "device_id", "webhook_url", "enabled", "required_state"}
         sets = []
         params: list[Any] = []
         for key, val in updates.items():

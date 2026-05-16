@@ -243,6 +243,111 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"unknown key_id: {key_id}")
         return {"ok": True, "key_id": key_id, "deleted": True}
 
+    # ── Profiles + states (Phase 8) ───────────────────────────────────────
+
+    @app.get("/api/v1/profiles")
+    def list_profiles_endpoint() -> dict[str, Any]:
+        """Catalog of available device profiles with their behavioral defaults."""
+        from clawcam_gateway.profiles import PROFILES, get_profile_defaults
+        return {
+            "ok": True,
+            "profiles": [get_profile_defaults(p).to_dict() for p in PROFILES],
+            "count": len(PROFILES),
+        }
+
+    @app.get("/api/v1/profiles/{profile_name}")
+    def get_profile_endpoint(profile_name: str) -> dict[str, Any]:
+        from clawcam_gateway.profiles import is_valid_profile, get_profile_defaults
+        if not is_valid_profile(profile_name):
+            raise HTTPException(status_code=404, detail=f"unknown profile: {profile_name}")
+        return {"ok": True, "profile": get_profile_defaults(profile_name).to_dict()}
+
+    @app.get("/api/v1/devices/{device_id}/state")
+    def get_device_state_endpoint(device_id: str) -> dict[str, Any]:
+        row = db.get_device_profile_state(device_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"unknown device: {device_id}")
+        deployment_state = db.get_deployment_state(row.get("deployment_id") or "default")
+        effective = row.get("state") or deployment_state or "normal"
+        return {
+            "ok": True,
+            "device_id": device_id,
+            "profile": row.get("profile"),
+            "state": row.get("state"),
+            "deployment_id": row.get("deployment_id"),
+            "deployment_state": deployment_state,
+            "effective_state": effective,
+        }
+
+    @app.patch("/api/v1/devices/{device_id}/state")
+    def set_device_state_endpoint(
+        device_id: str, payload: Payload,
+        auth: AuthContext = Depends(require_write),
+    ) -> dict[str, Any]:
+        from clawcam_gateway.profiles import is_valid_state
+        new_state = payload.data.get("state")
+        if not is_valid_state(new_state):
+            raise HTTPException(
+                status_code=400,
+                detail=f"invalid state; must be one of: normal, armed, disarmed, away, vacation, feeding, maintenance",
+            )
+        ok, prev = db.set_device_state(
+            device_id, new_state,
+            transitioned_by=auth.key_id or auth.key_name,
+            reason=payload.data.get("reason"),
+        )
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"unknown device: {device_id}")
+        return {"ok": True, "device_id": device_id, "previous_state": prev, "state": new_state}
+
+    @app.patch("/api/v1/devices/{device_id}/profile")
+    def set_device_profile_endpoint(
+        device_id: str, payload: Payload,
+        auth: AuthContext = Depends(require_write),
+    ) -> dict[str, Any]:
+        from clawcam_gateway.profiles import is_valid_profile
+        new_profile = payload.data.get("profile")
+        if not is_valid_profile(new_profile):
+            raise HTTPException(status_code=400, detail=f"invalid profile: {new_profile}")
+        ok = db.set_device_profile(device_id, new_profile)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"unknown device: {device_id}")
+        return {"ok": True, "device_id": device_id, "profile": new_profile}
+
+    @app.patch("/api/v1/deployments/{deployment_id}/state")
+    def set_deployment_state_endpoint(
+        deployment_id: str, payload: Payload,
+        auth: AuthContext = Depends(require_write),
+    ) -> dict[str, Any]:
+        from clawcam_gateway.profiles import is_valid_state
+        new_state = payload.data.get("state")
+        if not is_valid_state(new_state):
+            raise HTTPException(status_code=400, detail="invalid state")
+        ok, prev = db.set_deployment_state(
+            deployment_id, new_state,
+            transitioned_by=auth.key_id or auth.key_name,
+            reason=payload.data.get("reason"),
+        )
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"unknown deployment: {deployment_id}")
+        return {"ok": True, "deployment_id": deployment_id, "previous_state": prev, "state": new_state}
+
+    @app.get("/api/v1/state-transitions")
+    def list_state_transitions_endpoint(
+        target_kind: str | None = None,
+        target_id: str | None = None,
+        deployment_id: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        safe_limit = max(1, min(limit, 500))
+        transitions = db.list_state_transitions(
+            target_kind=target_kind,
+            target_id=target_id,
+            deployment_id=deployment_id,
+            limit=safe_limit,
+        )
+        return {"ok": True, "transitions": transitions, "count": len(transitions)}
+
     @app.post("/api/v1/devices")
     def register_device(payload: Payload) -> dict[str, Any]:
         try:

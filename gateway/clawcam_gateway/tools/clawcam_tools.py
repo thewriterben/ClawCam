@@ -523,6 +523,117 @@ def create_alert_rule(
     }
 
 
+def list_profiles(context: ToolContext) -> dict[str, Any]:
+    """List all available device profiles with their behavioral defaults."""
+    from clawcam_gateway.profiles import PROFILES, get_profile_defaults
+    return {
+        "ok": True,
+        "count": len(PROFILES),
+        "profiles": [get_profile_defaults(p).to_dict() for p in PROFILES],
+    }
+
+
+def get_device_state(context: ToolContext, device_id: str) -> dict[str, Any]:
+    """Return the profile + state of a device, with deployment-level fallback."""
+    row = context.db.get_device_profile_state(device_id)
+    if row is None:
+        return {"ok": False, "error": f"unknown device: {device_id}", "device_id": device_id}
+    deployment_id = row.get("deployment_id") or "default"
+    deployment_state = context.db.get_deployment_state(deployment_id)
+    effective = row.get("state") or deployment_state or "normal"
+    return {
+        "ok": True,
+        "device_id": device_id,
+        "profile": row.get("profile"),
+        "state": row.get("state"),
+        "deployment_id": deployment_id,
+        "deployment_state": deployment_state,
+        "effective_state": effective,
+    }
+
+
+def set_device_state(
+    context: ToolContext,
+    device_id: str,
+    state: str,
+    reason: str | None = None,
+    approval_id: str | None = None,
+) -> dict[str, Any]:
+    """Change the runtime state of a device. Approval-gated (changes behavior).
+
+    Allowed states: normal, armed, disarmed, away, vacation, feeding, maintenance.
+    Every transition is recorded in the state_transitions audit table.
+    """
+    from clawcam_gateway.profiles import is_valid_state
+    if not is_valid_state(state):
+        return {
+            "ok": False,
+            "error": f"invalid state '{state}'; must be one of "
+                     "normal, armed, disarmed, away, vacation, feeding, maintenance",
+        }
+    ok, prev = context.db.set_device_state(
+        device_id, state,
+        transitioned_by=approval_id or "mcp_tool",
+        reason=reason,
+    )
+    if not ok:
+        return {"ok": False, "error": f"unknown device: {device_id}", "device_id": device_id}
+    return {
+        "ok": True,
+        "device_id": device_id,
+        "previous_state": prev,
+        "state": state,
+        "message": f"Device {device_id} transitioned {prev} → {state}.",
+    }
+
+
+def set_deployment_state(
+    context: ToolContext,
+    deployment_id: str,
+    state: str,
+    reason: str | None = None,
+    approval_id: str | None = None,
+) -> dict[str, Any]:
+    """Change the runtime state of an entire deployment. Approval-gated.
+
+    All devices in the deployment whose own state is unset inherit this value.
+    Useful for "arm the whole house" or "switch the apiary to maintenance".
+    """
+    from clawcam_gateway.profiles import is_valid_state
+    if not is_valid_state(state):
+        return {"ok": False, "error": f"invalid state '{state}'"}
+    ok, prev = context.db.set_deployment_state(
+        deployment_id, state,
+        transitioned_by=approval_id or "mcp_tool",
+        reason=reason,
+    )
+    if not ok:
+        return {"ok": False, "error": f"unknown deployment: {deployment_id}"}
+    return {
+        "ok": True,
+        "deployment_id": deployment_id,
+        "previous_state": prev,
+        "state": state,
+        "message": f"Deployment {deployment_id} transitioned {prev} → {state}.",
+    }
+
+
+def list_state_transitions(
+    context: ToolContext,
+    target_kind: str | None = None,
+    target_id: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Return recent state transitions for diagnostics and audit."""
+    safe_limit = max(1, min(int(limit), 500))
+    transitions = context.db.list_state_transitions(
+        target_kind=target_kind,
+        target_id=target_id,
+        limit=safe_limit,
+    )
+    return {"ok": True, "count": len(transitions), "transitions": transitions}
+
+
 def _validate_config_patch(patch: dict[str, Any]) -> None:
     """Reject patches that reference protected keys."""
 

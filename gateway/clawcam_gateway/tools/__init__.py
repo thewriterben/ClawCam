@@ -8,6 +8,7 @@ from clawcam_gateway.tools.clawcam_tools import (
     export_detections_csv,
     generate_daily_summary,
     get_cloud_sync_status,
+    get_device_state,
     get_inference_results,
     get_node_health,
     get_recent_detections,
@@ -15,9 +16,13 @@ from clawcam_gateway.tools.clawcam_tools import (
     list_capabilities,
     list_firmware_builds,
     list_pending_commands,
+    list_profiles,
     list_recent_alerts,
     list_species_detections,
+    list_state_transitions,
     queue_firmware_update,
+    set_deployment_state,
+    set_device_state,
 )
 
 __all__ = [
@@ -28,6 +33,7 @@ __all__ = [
     "export_detections_csv",
     "generate_daily_summary",
     "get_cloud_sync_status",
+    "get_device_state",
     "get_inference_results",
     "get_node_health",
     "get_recent_detections",
@@ -35,7 +41,11 @@ __all__ = [
     "list_capabilities",
     "list_firmware_builds",
     "list_pending_commands",
+    "list_profiles",
     "list_recent_alerts",
     "list_species_detections",
+    "list_state_transitions",
     "queue_firmware_update",
+    "set_deployment_state",
+    "set_device_state",
 ]

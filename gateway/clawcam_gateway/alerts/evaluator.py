@@ -61,15 +61,33 @@ class AlertEvaluator:
             logger.warning("AlertEvaluator: could not load rules: %s", exc)
             return 0
 
+        # Resolve effective state: device override > deployment default > 'normal'
+        current_state = self._resolve_state(device_id)
+
         fired = 0
         for rule_dict in rules:
             rule = AlertRule.from_dict(rule_dict)
-            if not rule.matches(result, device_id=device_id):
+            if not rule.matches(result, device_id=device_id, current_state=current_state):
                 continue
             fired += 1
             self._fire(rule, result, event_id, device_id)
 
         return fired
+
+    def _resolve_state(self, device_id: str | None) -> str | None:
+        """Return the effective state for a device, or None on lookup error."""
+        if device_id is None:
+            return None
+        try:
+            row = self._db.get_device_profile_state(device_id)
+            if row is None:
+                return None
+            if row.get("state"):
+                return row["state"]
+            # Fall back to deployment-level state
+            return self._db.get_deployment_state(row.get("deployment_id") or "default")
+        except Exception:  # noqa: BLE001
+            return None
 
     # ── Internal ──────────────────────────────────────────────────────────
 

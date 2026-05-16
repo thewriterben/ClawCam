@@ -17,6 +17,7 @@ from clawcam_gateway.tools import (
     export_detections_csv,
     generate_daily_summary,
     get_cloud_sync_status,
+    get_device_state,
     get_inference_results,
     get_node_health,
     get_recent_detections,
@@ -24,9 +25,13 @@ from clawcam_gateway.tools import (
     list_capabilities,
     list_firmware_builds,
     list_pending_commands,
+    list_profiles,
     list_recent_alerts,
     list_species_detections,
+    list_state_transitions,
     queue_firmware_update,
+    set_deployment_state,
+    set_device_state,
 )
 
 
@@ -55,6 +60,11 @@ def dispatch_tool(name: str, arguments: dict[str, Any] | None = None, database_p
         "list_alert_rules": lambda **kw: list_alert_rules(context, **kw),
         "list_recent_alerts": lambda **kw: list_recent_alerts(context, **kw),
         "create_alert_rule": lambda **kw: create_alert_rule(context, **kw),
+        "list_profiles": lambda **kw: list_profiles(context, **kw),
+        "get_device_state": lambda **kw: get_device_state(context, **kw),
+        "list_state_transitions": lambda **kw: list_state_transitions(context, **kw),
+        "set_device_state": lambda **kw: set_device_state(context, **kw),
+        "set_deployment_state": lambda **kw: set_deployment_state(context, **kw),
         "capture_now": lambda **kw: capture_now(context, **kw),
         "apply_config_patch": lambda **kw: apply_config_patch(context, **kw),
         "queue_firmware_update": lambda **kw: queue_firmware_update(context, **kw),
