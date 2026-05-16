@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from clawcam_gateway.alerts.evaluator import AlertEvaluator
+from clawcam_gateway.audio import AudioPipeline
 from clawcam_gateway.api.auth_dependency import (
     get_auth_context,
     require_admin,
@@ -76,6 +77,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     cloud_worker = CloudUploadWorker(db=db, store=cloud_store)
     alert_evaluator = AlertEvaluator(db=db, default_webhook=config.alert_webhook_url)
     schedule_engine = ScheduleEngine(db=db)
+    audio_pipeline = AudioPipeline(db=db, enabled=config.audio_enabled)
     bridge = MQTTBridge(
         db=db,
         broker_host=config.mqtt_broker_host,
@@ -338,6 +340,70 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         if not ok:
             raise HTTPException(status_code=404, detail=f"unknown zone: {zone_id}")
         return {"ok": True, "zone_id": zone_id, "deleted": True}
+
+    # ── Audio pipeline (Phase 11) ─────────────────────────────────────────
+
+    @app.post("/api/v1/audio/{event_id}")
+    async def upload_audio(
+        event_id: str,
+        file: UploadFile,
+        background_tasks: BackgroundTasks,
+    ) -> dict[str, Any]:
+        """Accept a WAV/OGG/MP3 from a node and run classifiers in the background."""
+        event_row = db.get_event(event_id)
+        if event_row is None:
+            raise HTTPException(status_code=404, detail=f"unknown event: {event_id}")
+
+        audio_dir = config.media_dir / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        suffix = Path(file.filename or "clip.wav").suffix or ".wav"
+        dest = audio_dir / f"{event_id}{suffix}"
+        content = await file.read()
+        dest.write_bytes(content)
+
+        audio_id = db.add_audio_upload({
+            "event_id": event_id,
+            "device_id": event_row.get("device_id"),
+            "path": str(dest),
+            "format": suffix.lstrip("."),
+            "size_bytes": len(content),
+        })
+
+        background_tasks.add_task(audio_pipeline.run, audio_id, str(dest), event_id)
+        return {
+            "ok": True,
+            "audio_id": audio_id,
+            "event_id": event_id,
+            "path": str(dest),
+            "size_bytes": len(content),
+            "classifier": audio_pipeline.classifier_name,
+        }
+
+    @app.get("/api/v1/audio/{event_id}/classifications")
+    def get_event_audio_classifications(event_id: str) -> dict[str, Any]:
+        classifications = db.list_audio_classifications(event_id=event_id)
+        uploads = db.list_audio_uploads(event_id=event_id)
+        return {
+            "ok": True,
+            "event_id": event_id,
+            "uploads": uploads,
+            "classifications": classifications,
+            "count": len(classifications),
+        }
+
+    @app.get("/api/v1/audio/recent")
+    def recent_audio_classifications(
+        limit: int = 25,
+        label: str | None = None,
+        species: str | None = None,
+        min_confidence: float = 0.0,
+    ) -> dict[str, Any]:
+        safe_limit = max(1, min(limit, 200))
+        results = db.list_audio_classifications(
+            label=label, species=species,
+            min_confidence=min_confidence, limit=safe_limit,
+        )
+        return {"ok": True, "results": results, "count": len(results)}
 
     # ── Schedules (Phase 9) ───────────────────────────────────────────────
 

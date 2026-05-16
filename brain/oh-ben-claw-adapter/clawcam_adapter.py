@@ -57,6 +57,8 @@ class ToolPolicy:
         "list_schedules",
         "list_schedule_runs",
         "list_detection_zones",
+        "list_audio_classifications",
+        "get_audio_for_event",
     }))
     always_ask: frozenset[str] = field(default_factory=lambda: frozenset({
         "capture_now",

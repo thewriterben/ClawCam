@@ -290,6 +290,46 @@ class GatewayDatabase:
                     ON detection_zones(enabled);
                 CREATE INDEX IF NOT EXISTS idx_detection_zones_deployment
                     ON detection_zones(deployment_id);
+
+                -- Phase 11: audio pipeline ----------------------------------
+                CREATE TABLE IF NOT EXISTS audio_uploads (
+                    audio_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id TEXT,
+                    device_id TEXT,
+                    deployment_id TEXT NOT NULL DEFAULT 'default',
+                    path TEXT NOT NULL,
+                    duration_s REAL,
+                    sample_rate INTEGER,
+                    format TEXT,
+                    size_bytes INTEGER,
+                    sha256 TEXT,
+                    captured_at TEXT,
+                    received_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_audio_uploads_event ON audio_uploads(event_id);
+                CREATE INDEX IF NOT EXISTS idx_audio_uploads_device ON audio_uploads(device_id);
+                CREATE INDEX IF NOT EXISTS idx_audio_uploads_received ON audio_uploads(received_at);
+
+                CREATE TABLE IF NOT EXISTS audio_classifications (
+                    classification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    audio_id INTEGER NOT NULL,
+                    event_id TEXT,
+                    classifier_name TEXT NOT NULL,
+                    classifier_version TEXT NOT NULL,
+                    label TEXT NOT NULL,
+                    species TEXT,
+                    confidence REAL NOT NULL,
+                    time_offset_s REAL,
+                    duration_s REAL,
+                    ran_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY(audio_id) REFERENCES audio_uploads(audio_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_audio_class_audio ON audio_classifications(audio_id);
+                CREATE INDEX IF NOT EXISTS idx_audio_class_event ON audio_classifications(event_id);
+                CREATE INDEX IF NOT EXISTS idx_audio_class_label ON audio_classifications(label);
+                CREATE INDEX IF NOT EXISTS idx_audio_class_species ON audio_classifications(species);
                 """
             )
             # Idempotent column-additions for legacy tables. ADD COLUMN is the
@@ -1302,6 +1342,139 @@ class GatewayDatabase:
                 "DELETE FROM detection_zones WHERE zone_id = ?", (zone_id,),
             )
         return cur.rowcount > 0
+
+    # ── Audio pipeline (Phase 11) ─────────────────────────────────────────
+
+    def add_audio_upload(self, audio: dict[str, Any]) -> int:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO audio_uploads
+                    (event_id, device_id, deployment_id, path,
+                     duration_s, sample_rate, format, size_bytes, sha256,
+                     captured_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    audio.get("event_id"),
+                    audio.get("device_id"),
+                    audio.get("deployment_id", "default"),
+                    audio["path"],
+                    audio.get("duration_s"),
+                    audio.get("sample_rate"),
+                    audio.get("format"),
+                    audio.get("size_bytes"),
+                    audio.get("sha256"),
+                    audio.get("captured_at"),
+                ),
+            )
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    def get_audio_upload(self, audio_id: int) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT audio_id, event_id, device_id, deployment_id, path,
+                       duration_s, sample_rate, format, size_bytes, sha256,
+                       captured_at, received_at
+                FROM audio_uploads WHERE audio_id = ?
+                """,
+                (audio_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_audio_uploads(
+        self,
+        event_id: str | None = None,
+        device_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if event_id:
+            clauses.append("event_id = ?")
+            params.append(event_id)
+        if device_id:
+            clauses.append("device_id = ?")
+            params.append(device_id)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        params.append(limit)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT audio_id, event_id, device_id, deployment_id, path,
+                       duration_s, sample_rate, format, size_bytes, sha256,
+                       captured_at, received_at
+                FROM audio_uploads {where}
+                ORDER BY received_at DESC, audio_id DESC LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_audio_classification(self, classification: dict[str, Any]) -> int:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO audio_classifications
+                    (audio_id, event_id, classifier_name, classifier_version,
+                     label, species, confidence, time_offset_s, duration_s)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    classification["audio_id"],
+                    classification.get("event_id"),
+                    classification["classifier_name"],
+                    classification["classifier_version"],
+                    classification["label"],
+                    classification.get("species"),
+                    float(classification["confidence"]),
+                    classification.get("time_offset_s"),
+                    classification.get("duration_s"),
+                ),
+            )
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    def list_audio_classifications(
+        self,
+        audio_id: int | None = None,
+        event_id: str | None = None,
+        label: str | None = None,
+        species: str | None = None,
+        min_confidence: float = 0.0,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if audio_id is not None:
+            clauses.append("audio_id = ?")
+            params.append(audio_id)
+        if event_id:
+            clauses.append("event_id = ?")
+            params.append(event_id)
+        if label:
+            clauses.append("label = ?")
+            params.append(label)
+        if species:
+            clauses.append("species LIKE ?")
+            params.append(f"%{species}%")
+        if min_confidence > 0:
+            clauses.append("confidence >= ?")
+            params.append(min_confidence)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        params.append(limit)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT classification_id, audio_id, event_id, classifier_name,
+                       classifier_version, label, species, confidence,
+                       time_offset_s, duration_s, ran_at
+                FROM audio_classifications {where}
+                ORDER BY ran_at DESC, classification_id DESC LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     # ── Alert rules ───────────────────────────────────────────────────────
 

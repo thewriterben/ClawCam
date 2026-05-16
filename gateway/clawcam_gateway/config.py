@@ -41,6 +41,8 @@ class GatewayConfig:
     scheduler_enabled: bool = False      # opt-in; the engine's tick() is also driven
                                          # synchronously by tests and admin tools
     scheduler_tick_interval_s: int = 30
+    # Audio pipeline (Phase 11)
+    audio_enabled: bool = True           # mock classifier always works, so on by default
 
     @classmethod
     def from_env(cls) -> "GatewayConfig":
@@ -71,4 +73,5 @@ class GatewayConfig:
             default_deployment_id=os.getenv("CLAWCAM_DEFAULT_DEPLOYMENT", "default"),
             scheduler_enabled=os.getenv("CLAWCAM_SCHEDULER_ENABLED", "false").lower() == "true",
             scheduler_tick_interval_s=int(os.getenv("CLAWCAM_SCHEDULER_TICK_S", "30")),
+            audio_enabled=os.getenv("CLAWCAM_AUDIO_ENABLED", "true").lower() != "false",
         )

@@ -767,6 +767,41 @@ def create_detection_zone(
     }
 
 
+def list_audio_classifications(
+    context: ToolContext,
+    event_id: str | None = None,
+    label: str | None = None,
+    species: str | None = None,
+    min_confidence: float = 0.0,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Return recent audio classifications (BirdNET / glass-break / etc.).
+
+    Audio is captured at devices with profiles that enable it (bird_feeder,
+    home_security_*, apiary). Each classifier-hit gets one row with label,
+    species, confidence, time offset within the audio file.
+    """
+    safe_limit = max(1, min(int(limit), 500))
+    results = context.db.list_audio_classifications(
+        event_id=event_id, label=label, species=species,
+        min_confidence=float(min_confidence), limit=safe_limit,
+    )
+    return {"ok": True, "count": len(results), "results": results}
+
+
+def get_audio_for_event(context: ToolContext, event_id: str) -> dict[str, Any]:
+    """Return all uploaded audio files + their classifications for *event_id*."""
+    uploads = context.db.list_audio_uploads(event_id=event_id)
+    classifications = context.db.list_audio_classifications(event_id=event_id)
+    return {
+        "ok": True,
+        "event_id": event_id,
+        "upload_count": len(uploads),
+        "uploads": uploads,
+        "classifications": classifications,
+    }
+
+
 def _validate_config_patch(patch: dict[str, Any]) -> None:
     """Reject patches that reference protected keys."""
 

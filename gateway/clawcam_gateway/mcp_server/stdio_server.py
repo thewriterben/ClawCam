@@ -301,6 +301,29 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "list_audio_classifications",
+        "description": "List recent audio classifier hits (BirdNET bird calls, glass-break, scream, dog-bark, etc.). Each row carries label, species, confidence, and the time offset within the audio file.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "string"},
+                "label": {"type": "string"},
+                "species": {"type": "string"},
+                "min_confidence": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.0},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50},
+            },
+        },
+    },
+    {
+        "name": "get_audio_for_event",
+        "description": "Return all uploaded audio files plus their classifications for a single event.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["event_id"],
+            "properties": {"event_id": {"type": "string"}},
+        },
+    },
+    {
         "name": "capture_now",
         "description": "Request a manual capture from a reachable ClawCam node. Approval-gated; requires cap_clawcam_camera_trap.",
         "inputSchema": {
