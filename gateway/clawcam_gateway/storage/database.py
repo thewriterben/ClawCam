@@ -353,6 +353,8 @@ class GatewayDatabase:
             self._add_column_if_missing(conn, "deployments", "state", "TEXT NOT NULL DEFAULT 'normal'")
             # Alert rules gain an optional state gate
             self._add_column_if_missing(conn, "alert_rules", "required_state", "TEXT")
+            # Phase 12: per-device detector chain override
+            self._add_column_if_missing(conn, "devices", "detector_chain_json", "TEXT")
 
     @staticmethod
     def _add_column_if_missing(conn, table: str, column: str, column_def: str) -> None:
@@ -456,10 +458,29 @@ class GatewayDatabase:
     def get_device(self, device_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT payload_json FROM devices WHERE device_id = ?",
+                """
+                SELECT payload_json, profile, state, deployment_id,
+                       detector_chain_json
+                FROM devices WHERE device_id = ?
+                """,
                 (device_id,),
             ).fetchone()
-        return json.loads(row["payload_json"]) if row else None
+        if row is None:
+            return None
+        payload = json.loads(row["payload_json"])
+        # Merge per-column fields back into the payload so callers get a single
+        # unified dict regardless of whether the value lives in JSON or in a
+        # SQL column. JSON values win when both exist (the device's
+        # registration intent stays canonical).
+        payload.setdefault("profile", row["profile"])
+        payload.setdefault("state", row["state"])
+        payload.setdefault("deployment_id", row["deployment_id"])
+        if row["detector_chain_json"]:
+            try:
+                payload["detector_chain"] = json.loads(row["detector_chain_json"])
+            except Exception:  # noqa: BLE001
+                pass
+        return payload
 
     def list_devices(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
@@ -595,6 +616,36 @@ class GatewayDatabase:
             "top_species": row["top_species"],
             "ran_at": row["ran_at"],
         }
+
+    def list_inference_results_for_event(self, event_id: str) -> list[dict[str, Any]]:
+        """Return *every* inference_results row for an event (Phase 12 chain).
+
+        Ordered oldest-first so callers see the chain in execution order.
+        """
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT event_id, media_path, model_name, model_version,
+                       detections_json, top_label, top_confidence, top_species, ran_at
+                FROM inference_results WHERE event_id = ?
+                ORDER BY ran_at ASC, result_id ASC
+                """,
+                (event_id,),
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            out.append({
+                "event_id": row["event_id"],
+                "media_path": row["media_path"],
+                "model_name": row["model_name"],
+                "model_version": row["model_version"],
+                "detections": json.loads(row["detections_json"]),
+                "top_label": row["top_label"],
+                "top_confidence": row["top_confidence"],
+                "top_species": row["top_species"],
+                "ran_at": row["ran_at"],
+            })
+        return out
 
     def list_inference_results(
         self,
@@ -948,6 +999,17 @@ class GatewayDatabase:
             cur = conn.execute(
                 "UPDATE devices SET profile = ? WHERE device_id = ?",
                 (profile, device_id),
+            )
+        return cur.rowcount > 0
+
+    def set_device_detector_chain(
+        self, device_id: str, chain: list[str] | None,
+    ) -> bool:
+        """Set or clear (chain=None) the per-device detector chain override."""
+        with self.connect() as conn:
+            cur = conn.execute(
+                "UPDATE devices SET detector_chain_json = ? WHERE device_id = ?",
+                (json.dumps(chain) if chain is not None else None, device_id),
             )
         return cur.rowcount > 0
 

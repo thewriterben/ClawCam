@@ -802,6 +802,67 @@ def get_audio_for_event(context: ToolContext, event_id: str) -> dict[str, Any]:
     }
 
 
+def list_detectors(context: ToolContext) -> dict[str, Any]:
+    """Return all detectors known to the gateway's registry, with availability."""
+    from clawcam_gateway.inference.registry import get_registry
+    reg = get_registry()
+    return {
+        "ok": True,
+        "all_detectors": reg.names(),
+        "available_detectors": reg.available_names(),
+    }
+
+
+def get_device_detector_chain(context: ToolContext, device_id: str) -> dict[str, Any]:
+    """Return the detector chain that will run on uploads from *device_id*.
+
+    Resolution order: per-device override → profile defaults → mock.
+    """
+    from clawcam_gateway.inference.orchestrator import InferenceOrchestrator
+    device = context.db.get_device(device_id)
+    if device is None:
+        return {"ok": False, "error": f"unknown device: {device_id}"}
+    chain = InferenceOrchestrator(db=context.db).chain_for_device(device_id)
+    return {
+        "ok": True,
+        "device_id": device_id,
+        "profile": device.get("profile"),
+        "chain": chain,
+        "override_set": "detector_chain" in device,
+    }
+
+
+def set_device_detector_chain(
+    context: ToolContext,
+    device_id: str,
+    chain: list[str] | None = None,
+    approval_id: str | None = None,
+) -> dict[str, Any]:
+    """Set or clear a per-device detector chain override. Approval-gated.
+
+    chain=None resets to profile defaults. List must be detector names from
+    the registry (list_detectors); unknown names are stored but will be
+    silently skipped by the orchestrator at run-time.
+    """
+    if chain is not None and not isinstance(chain, list):
+        return {"ok": False, "error": "chain must be a list of detector names or null"}
+    ok = context.db.set_device_detector_chain(device_id, chain)
+    if not ok:
+        return {"ok": False, "error": f"unknown device: {device_id}"}
+    return {"ok": True, "device_id": device_id, "chain": chain}
+
+
+def get_event_inference_chain(context: ToolContext, event_id: str) -> dict[str, Any]:
+    """Return the full multi-detector chain result for a single event.
+
+    With Phase 12, each event can have multiple inference_results rows
+    (one per detector in the chain). This tool returns all of them
+    ordered by execution time.
+    """
+    results = context.db.list_inference_results_for_event(event_id)
+    return {"ok": True, "event_id": event_id, "count": len(results), "results": results}
+
+
 def _validate_config_patch(patch: dict[str, Any]) -> None:
     """Reject patches that reference protected keys."""
 

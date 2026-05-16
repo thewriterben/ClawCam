@@ -59,6 +59,9 @@ class ToolPolicy:
         "list_detection_zones",
         "list_audio_classifications",
         "get_audio_for_event",
+        "list_detectors",
+        "get_device_detector_chain",
+        "get_event_inference_chain",
     }))
     always_ask: frozenset[str] = field(default_factory=lambda: frozenset({
         "capture_now",
@@ -69,6 +72,7 @@ class ToolPolicy:
         "set_deployment_state",
         "create_schedule",
         "create_detection_zone",
+        "set_device_detector_chain",
     }))
 
     def requires_approval(self, tool_name: str) -> bool:

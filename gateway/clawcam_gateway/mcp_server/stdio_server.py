@@ -324,6 +324,42 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "list_detectors",
+        "description": "Return the registry of detectors known to the gateway with their availability status. Useful for discovering what models are installed before configuring a detector chain.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_device_detector_chain",
+        "description": "Return the resolved detector chain for a device: per-device override (if any) or the profile defaults. This is what runs on every image uploaded from that device.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["device_id"],
+            "properties": {"device_id": {"type": "string"}},
+        },
+    },
+    {
+        "name": "get_event_inference_chain",
+        "description": "Return every inference_results row for a single event in execution order. Useful when multiple detectors run on the same image (e.g. MegaDetector + bird classifier + face recognizer).",
+        "inputSchema": {
+            "type": "object",
+            "required": ["event_id"],
+            "properties": {"event_id": {"type": "string"}},
+        },
+    },
+    {
+        "name": "set_device_detector_chain",
+        "description": "Override the detector chain for a single device. Pass null/empty chain to clear the override and revert to profile defaults. Approval-gated.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["device_id"],
+            "properties": {
+                "device_id": {"type": "string"},
+                "chain": {"type": "array", "items": {"type": "string"}},
+                "approval_id": {"type": "string"},
+            },
+        },
+    },
+    {
         "name": "capture_now",
         "description": "Request a manual capture from a reachable ClawCam node. Approval-gated; requires cap_clawcam_camera_trap.",
         "inputSchema": {

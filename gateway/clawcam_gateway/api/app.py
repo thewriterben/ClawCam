@@ -36,6 +36,7 @@ from clawcam_gateway.scheduler import (
     ScheduleEngine,
     is_valid_action,
 )
+from clawcam_gateway.inference.orchestrator import InferenceOrchestrator
 from clawcam_gateway.inference.pipeline import InferencePipeline
 from clawcam_gateway.ingest.export import (
     csv_filename,
@@ -73,6 +74,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     config = config or GatewayConfig.from_env()
     db = GatewayDatabase(config.database_path)
     pipeline = InferencePipeline(db=db, enabled=config.inference_enabled)
+    inference_orchestrator = InferenceOrchestrator(db=db, enabled=config.inference_enabled)
     cloud_store = get_cloud_store(config)
     cloud_worker = CloudUploadWorker(db=db, store=cloud_store)
     alert_evaluator = AlertEvaluator(db=db, default_webhook=config.alert_webhook_url)
@@ -340,6 +342,51 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         if not ok:
             raise HTTPException(status_code=404, detail=f"unknown zone: {zone_id}")
         return {"ok": True, "zone_id": zone_id, "deleted": True}
+
+    # ── Detector chains (Phase 12) ────────────────────────────────────────
+
+    @app.get("/api/v1/detectors")
+    def list_registered_detectors() -> dict[str, Any]:
+        """Return the registry of detectors known to the gateway."""
+        from clawcam_gateway.inference.registry import get_registry
+        reg = get_registry()
+        return {
+            "ok": True,
+            "all_detectors": reg.names(),
+            "available_detectors": reg.available_names(),
+        }
+
+    @app.get("/api/v1/devices/{device_id}/detector-chain")
+    def get_device_detector_chain(device_id: str) -> dict[str, Any]:
+        chain = inference_orchestrator.chain_for_device(device_id)
+        device = db.get_device(device_id)
+        if device is None:
+            raise HTTPException(status_code=404, detail=f"unknown device: {device_id}")
+        return {
+            "ok": True,
+            "device_id": device_id,
+            "profile": device.get("profile"),
+            "chain": chain,
+            "override_set": "detector_chain" in device,
+        }
+
+    @app.patch("/api/v1/devices/{device_id}/detector-chain")
+    def set_device_detector_chain_endpoint(
+        device_id: str, payload: Payload,
+        auth: AuthContext = Depends(require_write),
+    ) -> dict[str, Any]:
+        chain = payload.data.get("chain")
+        if chain is not None and not isinstance(chain, list):
+            raise HTTPException(status_code=400, detail="chain must be a list of detector names or null")
+        ok = db.set_device_detector_chain(device_id, chain)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"unknown device: {device_id}")
+        return {"ok": True, "device_id": device_id, "chain": chain}
+
+    @app.get("/api/v1/events/{event_id}/inference/chain")
+    def get_event_inference_chain(event_id: str) -> dict[str, Any]:
+        results = db.list_inference_results_for_event(event_id)
+        return {"ok": True, "event_id": event_id, "results": results, "count": len(results)}
 
     # ── Audio pipeline (Phase 11) ─────────────────────────────────────────
 
@@ -740,8 +787,18 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         except Exception:  # noqa: BLE001 - never block ingest on mask errors
             pass
 
-        # Run inference in the background (non-blocking)
-        background_tasks.add_task(pipeline.run, event_id, str(dest))
+        # Phase 12: orchestrator runs the full detector chain configured for
+        # this device's profile (with per-device override if set). Legacy
+        # single-detector pipeline kept as a fallback for tests that don't
+        # set up a device row first.
+        originating_device_id = (event_row or {}).get("device_id") if 'event_row' in locals() else None
+        if originating_device_id:
+            background_tasks.add_task(
+                inference_orchestrator.run, event_id, str(dest),
+                originating_device_id,
+            )
+        else:
+            background_tasks.add_task(pipeline.run, event_id, str(dest))
         # Evaluate alert rules after inference completes
         background_tasks.add_task(alert_evaluator.evaluate, event_id, None)
         # Queue cloud upload alongside inference (noop when cloud is disabled)

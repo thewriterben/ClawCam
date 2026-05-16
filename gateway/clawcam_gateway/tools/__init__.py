@@ -10,6 +10,8 @@ from clawcam_gateway.tools.clawcam_tools import (
     export_detections_csv,
     generate_daily_summary,
     get_audio_for_event,
+    get_device_detector_chain,
+    get_event_inference_chain,
     get_cloud_sync_status,
     get_device_state,
     get_inference_results,
@@ -18,6 +20,7 @@ from clawcam_gateway.tools.clawcam_tools import (
     list_alert_rules,
     list_audio_classifications,
     list_capabilities,
+    list_detectors,
     list_detection_zones,
     list_firmware_builds,
     list_pending_commands,
@@ -29,6 +32,7 @@ from clawcam_gateway.tools.clawcam_tools import (
     list_state_transitions,
     queue_firmware_update,
     set_deployment_state,
+    set_device_detector_chain,
     set_device_state,
 )
 
@@ -42,6 +46,8 @@ __all__ = [
     "export_detections_csv",
     "generate_daily_summary",
     "get_audio_for_event",
+    "get_device_detector_chain",
+    "get_event_inference_chain",
     "get_cloud_sync_status",
     "get_device_state",
     "get_inference_results",
@@ -50,6 +56,7 @@ __all__ = [
     "list_alert_rules",
     "list_audio_classifications",
     "list_capabilities",
+    "list_detectors",
     "list_detection_zones",
     "list_firmware_builds",
     "list_pending_commands",
@@ -61,5 +68,6 @@ __all__ = [
     "list_state_transitions",
     "queue_firmware_update",
     "set_deployment_state",
+    "set_device_detector_chain",
     "set_device_state",
 ]
