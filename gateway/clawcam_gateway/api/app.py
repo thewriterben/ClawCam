@@ -1075,10 +1075,39 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             tool_name, request.arguments,
             database_path=config.database_path,
             mqtt_bridge=bridge,
+            source="rest",
         )
         if not result.get("ok", False) and result.get("error", "").startswith("unknown"):
             raise HTTPException(status_code=404, detail=result)
         return result
+
+    # ── Observability (Phase 13 WS5) ─────────────────────────────────────
+
+    @app.get("/api/v1/metrics")
+    def metrics() -> dict[str, Any]:
+        """Gateway counters + per-tool call statistics from the audit table."""
+
+        tool_stats = db.tool_call_stats()
+        return {
+            "ok": True,
+            "counts": {
+                "devices": len(db.list_devices()),
+                "events": len(db.recent_events(limit=10_000)),
+                "inference_results": len(db.list_inference_results(limit=10_000)),
+                "alerts_fired": len(db.list_alert_events(limit=10_000)),
+            },
+            "tool_calls": {
+                "total": sum(s["calls"] for s in tool_stats),
+                "errors": sum(s["errors"] or 0 for s in tool_stats),
+                "by_tool": tool_stats,
+            },
+        }
+
+    @app.get("/api/v1/tool-audit")
+    def tool_audit(limit: int = 100) -> dict[str, Any]:
+        """Most recent tool-call audit rows (caller, args hash, latency)."""
+
+        return {"ok": True, "audit": db.list_tool_call_audit(limit=limit)}
 
     @app.get("/api/v1/dashboard")
     def dashboard_data(limit: int = 25) -> dict[str, Any]:

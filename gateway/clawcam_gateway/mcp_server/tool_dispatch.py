@@ -46,16 +46,51 @@ from clawcam_gateway.tools import (
 )
 
 
-def dispatch_tool(name: str, arguments: dict[str, Any] | None = None, database_path: str | Path = "clawcam_gateway.db", mqtt_bridge=None) -> dict[str, Any]:
+def dispatch_tool(
+    name: str,
+    arguments: dict[str, Any] | None = None,
+    database_path: str | Path = "clawcam_gateway.db",
+    mqtt_bridge=None,
+    source: str = "unknown",
+) -> dict[str, Any]:
     """Dispatch a ClawCam tool call by name.
+
+    Every dispatch is recorded in the ``tool_call_audit`` table (Phase 13 WS5):
+    timestamp, tool, SHA-256 of the arguments, caller ``source``, ok flag, and
+    latency. Audit failures never block the tool call.
 
     Args:
         name: Tool name from the ClawCam tool catalog.
         arguments: JSON-like tool arguments.
         database_path: Gateway database path.
+        source: Caller surface ("mcp-stdio", "rest", "unknown").
     """
 
+    import hashlib
+    import json as _json
+    import time
+    from datetime import datetime, timezone
+
     args = arguments or {}
+    _t0 = time.monotonic()
+
+    def _audit(result_ok: bool) -> None:
+        try:
+            from clawcam_gateway.storage.database import GatewayDatabase
+
+            args_hash = hashlib.sha256(
+                _json.dumps(args, sort_keys=True, default=str).encode()
+            ).hexdigest()
+            GatewayDatabase(database_path).record_tool_call_audit(
+                tool_name=name,
+                args_sha256=args_hash,
+                source=source,
+                ok=result_ok,
+                duration_ms=int((time.monotonic() - _t0) * 1000),
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+        except Exception:  # noqa: BLE001 - audit must never block dispatch
+            pass
     context = ToolContext(database_path=database_path, mqtt_bridge=mqtt_bridge)
     dispatch: dict[str, Callable[..., dict[str, Any]]] = {
         "get_recent_detections": lambda **kw: get_recent_detections(context, **kw),
@@ -92,8 +127,12 @@ def dispatch_tool(name: str, arguments: dict[str, Any] | None = None, database_p
         "queue_firmware_update": lambda **kw: queue_firmware_update(context, **kw),
     }
     if name not in dispatch:
-        return {"ok": False, "error": f"unknown ClawCam tool: {name}", "tool": name}
+        result = {"ok": False, "error": f"unknown ClawCam tool: {name}", "tool": name}
+        _audit(False)
+        return result
     try:
-        return dispatch[name](**args)
+        result = dispatch[name](**args)
     except TypeError as exc:
-        return {"ok": False, "error": f"invalid arguments for {name}: {exc}", "tool": name}
+        result = {"ok": False, "error": f"invalid arguments for {name}: {exc}", "tool": name}
+    _audit(bool(result.get("ok", False)))
+    return result

@@ -17,7 +17,8 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["../tests/gateway", "../tests/schemas"]
+# tests/evals is the Phase 13 WS4 release gate: no release while evals regress.
+testpaths = ["../tests/gateway", "../tests/schemas", "../tests/evals"]
 pythonpath = ["."]
 
 [tool.ruff]

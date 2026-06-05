@@ -1704,3 +1704,74 @@ class GatewayDatabase:
                 (device_id,),
             ).fetchone()
         return json.loads(row["payload_json"]) if row else None
+
+    # ── Tool-call audit (Phase 13 WS5) ────────────────────────────────────
+
+    _TOOL_AUDIT_DDL = """
+        CREATE TABLE IF NOT EXISTS tool_call_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            args_sha256 TEXT NOT NULL,
+            source TEXT NOT NULL,
+            ok INTEGER NOT NULL,
+            duration_ms INTEGER NOT NULL
+        )
+    """
+
+    def record_tool_call_audit(
+        self,
+        tool_name: str,
+        args_sha256: str,
+        source: str,
+        ok: bool,
+        duration_ms: int,
+        timestamp: str,
+    ) -> None:
+        """Append one tool-call audit row (table auto-created on first use)."""
+
+        with self.connect() as conn:
+            conn.execute(self._TOOL_AUDIT_DDL)
+            conn.execute(
+                """
+                INSERT INTO tool_call_audit
+                    (timestamp, tool_name, args_sha256, source, ok, duration_ms)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (timestamp, tool_name, args_sha256, source, 1 if ok else 0, duration_ms),
+            )
+
+    def tool_call_stats(self) -> list[dict[str, Any]]:
+        """Per-tool call counts, error counts, and average latency."""
+
+        with self.connect() as conn:
+            conn.execute(self._TOOL_AUDIT_DDL)
+            rows = conn.execute(
+                """
+                SELECT tool_name,
+                       COUNT(*) AS calls,
+                       SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS errors,
+                       ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
+                       MAX(timestamp) AS last_called_at
+                FROM tool_call_audit
+                GROUP BY tool_name
+                ORDER BY calls DESC
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_tool_call_audit(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Most recent tool-call audit rows."""
+
+        with self.connect() as conn:
+            conn.execute(self._TOOL_AUDIT_DDL)
+            rows = conn.execute(
+                """
+                SELECT timestamp, tool_name, args_sha256, source, ok, duration_ms
+                FROM tool_call_audit
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (max(1, min(limit, 1000)),),
+            ).fetchall()
+        return [dict(row) for row in rows]

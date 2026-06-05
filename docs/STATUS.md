@@ -2,7 +2,7 @@
 
 This document is the source of truth for current implementation maturity. ClawCam tracks progress for **working code**, **scaffolds**, **frameworks**, and **planned features**.
 
-## Current Repository State (Phase 6 Complete)
+## Current Repository State (Phase 12 Complete)
 
 | Area                            | Status             | Notes                                                                                         |
 |---------------------------------|--------------------|-----------------------------------------------------------------------------------------------|
@@ -44,6 +44,24 @@ This document is the source of truth for current implementation maturity. ClawCa
 | Alert REST endpoints            | ✅ **Working**      | POST/GET/PATCH/DELETE /api/v1/alert-rules; GET /api/v1/alerts with filters.                  |
 | Alert MCP tools                 | ✅ **Working**      | list_alert_rules, list_recent_alerts (auto-approved); create_alert_rule (approval-gated).    |
 | Phase 6 alert tests             | ✅ **Working**      | Rule matching, webhook, evaluator, DB CRUD, REST, tools, dispatch, stdio, adapter, config.   |
+| API key auth + scopes           | ✅ **Working**      | Hashed tokens; ordered scopes (admin ≥ write ≥ read); AuthContext injected per request.       |
+| Deployments (multi-tenant)      | ✅ **Working**      | deployments CRUD; api_keys bound to deployment_id; queries scoped per tenant.                 |
+| Phase 7 auth tests              | ✅ **Working**      | Token hashing, scope satisfaction, key CRUD/revoke, deployment scoping, disabled-auth mode.   |
+| Device profiles                 | ✅ **Working**      | 10 profiles (wildlife, security, bird_feeder, livestock, apiary…) with behavioral defaults.   |
+| Runtime state machine           | ✅ **Working**      | Device/deployment states (armed, away, feeding…); state_transitions audit table.              |
+| Phase 8 profile/state tests     | ✅ **Working**      | Profile catalog, defaults, state validation, transitions, REST, tools, adapter policy.        |
+| Schedule engine                 | ✅ **Working**      | 5-field cron (UTC) or one-shot; starts_at/ends_at gates; 30 s tick thread; run audit log.     |
+| Schedule actions                | ✅ **Working**      | set_state, set_deployment_state, enable_rule, disable_rule, webhook; handlers never raise.    |
+| Phase 9 scheduler tests         | ✅ **Working**      | Cron parsing, tick idempotence, action dispatch, REST CRUD, manual run, tools, adapter.       |
+| Polygon detection zones         | ✅ **Working**      | Normalised [0,1] polygons; actions alert/record/ignore/privacy_mask; zone-aware alerts.       |
+| Privacy masks                   | ✅ **Working**      | privacy_mask zones suppress detections before alert evaluation and tool output.               |
+| Phase 10 zone tests             | ✅ **Working**      | Polygon validation, point-in-polygon, mask filtering, REST CRUD, tools, adapter policy.       |
+| Audio capture pipeline          | ✅ **Working**      | POST /api/v1/audio/{event_id}; classification as BackgroundTask; results in SQLite.           |
+| Audio classifier abstraction    | ✅ **Working**      | BaseAudioClassifier; BirdNET (species) + Mock (deterministic); YAMNet-style labels.           |
+| Phase 11 audio tests            | ✅ **Working**      | Classifier abstraction, pipeline, DB methods, REST endpoints, tools, adapter policy.          |
+| Detector registry               | ✅ **Working**      | Name → factory mapping; lazy model loading; unavailable detectors skipped silently.           |
+| Multi-detector orchestration    | ✅ **Working**      | Per-profile/per-device detector chains; one event → multiple model results.                   |
+| Phase 12 orchestrator tests     | ✅ **Working**      | Registry resolve/skip, chain config, orchestrator runs, REST, tools, adapter policy.          |
 
 Ground Rules:
 - No feature will be described as "Working" until verified with tests and reproducible steps.
@@ -189,7 +207,104 @@ Phase 5 adds structured data export, cloud resilience, and a richer operator das
    so the brain can save it or display it inline. Accepts the same filters as the REST endpoint.
    Brain adapter policy unchanged — read-only tools need no approval.
 
-## Next Milestone: Hardware Integration
+## Phase 7 Complete — Deployments, API Key Auth & Multi-Tenant Foundation
+
+Phase 7 lets one gateway serve multiple sites or customers safely:
+
+1. **`deployments` table + CRUD** (`/api/v1/deployments`): a deployment is a tenant boundary.
+2. **API key auth** (`auth/tokens.py`): keys are generated with `secrets`, stored as SHA256
+   hashes, and bound to a `deployment_id`. Ordered scopes: `admin` ≥ `write` ≥ `read`.
+3. **`AuthContext` dependency** (`api/auth_dependency.py`): resolves the inbound key, injects
+   `deployment_id` and `scope` into handlers; mutating endpoints call `require("write")`.
+4. **Key management endpoints**: `GET/POST /api/v1/api-keys`, revoke, and delete.
+5. **Auth disabled by default** for single-user field deployments — a synthetic admin context
+   is injected so existing setups keep working unchanged.
+
+## Phase 8 Complete — Device Profiles & Runtime State Machine
+
+Phase 8 broadens ClawCam from a wildlife camera trap into a general camera platform:
+
+1. **Profile catalog** (`profiles/profiles.py`): `general`, `wildlife_trail_camera`,
+   `home_security_outdoor`, `home_security_indoor`, `bird_feeder`, `hummingbird_feeder`,
+   `livestock_watch`, `apiary`, `garden`, `driveway`. Each sets defaults for sleep policy,
+   capture cadence, detector chain, alert thresholds, and audio on/off — all overridable.
+2. **Runtime states** (`profiles/states.py`): `normal`, `armed`, `disarmed`, `away`,
+   `vacation`, `feeding`, `maintenance`. Deliberately loose strings, not a strict FSM;
+   every transition is recorded in the `state_transitions` audit table.
+3. **REST**: profile list/detail, device state get/patch, deployment state patch,
+   device profile patch, state-transitions query.
+4. **MCP tools**: `list_profiles`, `get_device_state`, `list_state_transitions`
+   (auto-approved); `set_device_state`, `set_deployment_state` (approval-gated).
+5. **Alert rules** can now require a state (e.g. only fire when `armed`).
+
+## Phase 9 Complete — Cron Schedule Engine & Persistent Scheduled Actions
+
+Phase 9 adds time-driven automation ("arm the driveway cam at 10pm"):
+
+1. **`ScheduleEngine`** (`scheduler/engine.py`): synchronous, idempotent `tick(now)` driven by
+   a 30-second background thread; fully unit-testable with explicit timestamps.
+2. **Schedule model**: 5-field cron expression (UTC) or one-shot (`cron_expr` NULL);
+   `starts_at`/`ends_at` window gates; persisted in SQLite with a `schedule_runs` audit log.
+3. **Action types** (`scheduler/actions.py`): `set_state`, `set_deployment_state`,
+   `enable_rule`, `disable_rule`, `webhook`. Handlers never raise — failures are recorded.
+4. **REST**: schedules CRUD, manual `POST /api/v1/schedules/{id}/run`, `GET /api/v1/schedule-runs`.
+5. **MCP tools**: `list_schedules`, `list_schedule_runs` (auto-approved);
+   `create_schedule` (approval-gated).
+
+## Phase 10 Complete — Polygon Detection Zones & Privacy Masks
+
+Phase 10 adds spatial awareness to detections:
+
+1. **Zone geometry** (`zones/geometry.py`): polygons with ≥3 vertices, coordinates normalised
+   to [0,1] so zones survive re-framing and resolution changes.
+2. **Zone actions**: `alert`, `record`, `ignore`, `privacy_mask`.
+3. **Privacy masks** (`zones/masks.py`): detections inside a `privacy_mask` zone are suppressed
+   before alert evaluation and excluded from tool output.
+4. **Alert evaluator** is zone-aware: `ignore` zones drop matches; `alert` zones route them.
+5. **REST**: `/api/v1/zones` full CRUD. **MCP tools**: `list_detection_zones` (auto-approved);
+   `create_detection_zone` (approval-gated).
+
+## Phase 11 Complete — Audio Capture, Classification & Storage
+
+Phase 11 gives nodes ears, mirroring the visual inference pipeline:
+
+1. **`BaseAudioClassifier`** (`audio/classifier.py`): returns `AudioClassification` dataclasses
+   shaped like visual `Detection`s so alerts, schedules, and tools reuse one vocabulary.
+2. **Implementations**: `BirdNETClassifier` (species ID, lazy-loaded) and
+   `MockAudioClassifier` (deterministic seeded results for CI). Label vocabulary covers
+   YAMNet-style events: `bird`, `glass_break`, `gunshot`, `scream`, etc.
+3. **Audio upload** (`POST /api/v1/audio/{event_id}`): classification runs as a FastAPI
+   `BackgroundTask`; results persist to SQLite with time offsets and durations.
+4. **REST**: per-event classifications and `GET /api/v1/audio/recent`.
+5. **MCP tools**: `list_audio_classifications`, `get_audio_for_event` (auto-approved).
+
+## Phase 12 Complete — Multi-Detector Orchestration
+
+Phase 12 lets one event run a chain of models instead of a single detector:
+
+1. **`DetectorRegistry`** (`inference/registry.py`): name → factory mapping; factories are
+   lazy so heavy models (face recognition, OCR) only load when a device needs them;
+   unknown/unavailable detectors are skipped silently.
+2. **Per-profile default chains**: e.g. a bird feeder runs MegaDetector + a species classifier;
+   a security camera could run MegaDetector + face recognizer + plate OCR.
+3. **Per-device overrides**: `PATCH /api/v1/devices/{device_id}/detector-chain`.
+4. **Orchestrator** (`inference/orchestrator.py`): runs each chain entry against an uploaded
+   image, persisting one inference result row per detector.
+5. **REST**: `GET /api/v1/detectors`, device detector-chain get/patch,
+   `GET /api/v1/events/{event_id}/inference/chain`.
+6. **MCP tools**: `list_detectors`, `get_device_detector_chain`, `get_event_inference_chain`
+   (auto-approved); `set_device_detector_chain` (approval-gated).
+
+## Next Milestone: Production Hardening (Phase 13)
+
+Lockstep with Oh-Ben-Claw Phase 15; see `NEXT_PHASE_PLAN.md` in the workspace root.
+
+- MCP 2026-07-28 readiness: dual-mode stdio bridge + gateway; cross-repo integration suite in both modes
+- Evaluation harness on deterministic mocks as a CI release gate
+- Gateway observability: tool-call audit log, metrics endpoint, dashboard funnel
+- Approval-model upgrade: call/session/forever scopes shared with Oh-Ben-Claw
+
+## Following Milestone: Hardware Integration (Phase 14)
 
 - Deploy on physical ESP32-S3-EYE; end-to-end field test with real PIR triggers and JPEG captures
 - Validate MQTT connectivity and OTA firmware update on device

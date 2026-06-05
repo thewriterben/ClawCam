@@ -4,6 +4,13 @@ This module implements the subset of the Model Context Protocol message flow tha
 needed for ClawCam's first agent integration surface: initialize, tools/list, and
 tools/call. It intentionally avoids adding a hard dependency on a specific MCP SDK while
 keeping the wire shape close to MCP-compatible JSON-RPC clients.
+
+Phase 13 (WS2): the server is **bilingual** across MCP lifecycles. Legacy
+(2024-11-05) clients may still send ``initialize``; 2026-07-28 clients send no
+handshake, carry ``_meta`` on every request, and may call ``server/discover``
+for on-demand capability discovery. The server holds no per-connection state,
+so handshake-less operation is native. ``tools/list`` responses carry ``ttlMs``
+and ``cacheScope`` (SEP-2549) so clients may cache the catalogue.
 """
 
 from __future__ import annotations
@@ -17,8 +24,12 @@ from typing import Any, TextIO
 from clawcam_gateway.mcp_server.tool_dispatch import dispatch_tool
 
 PROTOCOL_VERSION = "2024-11-05"
+PROTOCOL_VERSION_2026 = "2026-07-28"
 SERVER_NAME = "clawcam-gateway"
 SERVER_VERSION = "0.1.0"
+
+# How long clients may cache tools/list responses (SEP-2549).
+TOOLS_LIST_TTL_MS = 60_000
 
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -415,9 +426,19 @@ class ClawCamMCPServer:
 
         try:
             if method == "initialize":
+                # Legacy 2024-11-05 handshake (removed in 2026-07-28; kept
+                # for backwards compatibility — the server is bilingual).
                 result = self._initialize()
+            elif method == "server/discover":
+                # 2026-07-28 on-demand capability discovery (SEP-2575).
+                result = self._discover()
             elif method == "tools/list":
-                result = {"tools": TOOL_DEFINITIONS}
+                result = {
+                    "tools": TOOL_DEFINITIONS,
+                    # Additive cache metadata (SEP-2549); legacy clients ignore.
+                    "ttlMs": TOOLS_LIST_TTL_MS,
+                    "cacheScope": "private",
+                }
             elif method == "tools/call":
                 result = self._tool_call(params)
             elif method == "ping":
@@ -442,6 +463,19 @@ class ClawCamMCPServer:
             "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
         }
 
+    def _discover(self) -> dict[str, Any]:
+        """2026-07-28 capability discovery.
+
+        Shape mirrors the initialize result; revalidate against the final
+        specification when it ships on 2026-07-28.
+        """
+
+        return {
+            "protocolVersion": PROTOCOL_VERSION_2026,
+            "capabilities": {"tools": {"listChanged": False}},
+            "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
+        }
+
     def _tool_call(self, params: dict[str, Any]) -> dict[str, Any]:
         name = params.get("name")
         arguments = params.get("arguments") or {}
@@ -450,7 +484,9 @@ class ClawCamMCPServer:
         if not isinstance(arguments, dict):
             raise ValueError("tools/call arguments must be an object")
 
-        result = dispatch_tool(name, arguments, database_path=self.database_path)
+        result = dispatch_tool(
+            name, arguments, database_path=self.database_path, source="mcp-stdio"
+        )
         is_error = not bool(result.get("ok", False))
         return {
             "content": [

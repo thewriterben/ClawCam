@@ -1,0 +1,3 @@
+{
+  "tests/gateway/test_mcp_stdio_server.py": true
+}

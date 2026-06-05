@@ -1,53 +1,43 @@
 # ClawCam
 
-**ClawCam** is a robust wildlife monitoring platform that combines resilient camera-trap hardware, a local field gateway, and an edge AI operations layer.
+**ClawCam** is a smart camera platform that combines resilient ESP32 camera-trap hardware, an offline-first field gateway, and an edge AI operations layer. Wildlife monitoring is its first profile; device profiles also cover home security, bird feeders, livestock, apiaries, gardens, and driveways.
 
 ## Current Progress
-> **Current Status**: In progress; [view roadmap](docs/ROADMAP.md) and [detailed status](docs/STATUS.md).
+> **Current Status**: Phase 12 complete (software, simulator-verified); next milestone is physical hardware integration. See the [roadmap](docs/ROADMAP.md) and [detailed status](docs/STATUS.md).
 
 ### Phased Development Roadmap
-ClawCam’s development is intentionally phased to ensure each milestone delivers a functional, testable increment before advancing. Below is an overview of the current progress:
+ClawCam’s development is intentionally phased to ensure each milestone delivers a functional, testable increment before advancing:
 
-#### Phase 0: Repository Foundation (100% Complete)
-- Monorepo skeleton established.
-- Core documentation prepared: [STATUS.md](docs/STATUS.md), [ARCHITECTURE.md](docs/ARCHITECTURE.md).
-- Valid schema definitions for devices, events, observations, and health.
-
-#### Phase 1: Working Vertical Slice (50% In Progress)
-- Progress made on simulator event generation, gateway ingest, and API functionality.
-- Brain tool and complete documentation remain planned for later iterations.
+- **Phase 0 — Repository Foundation** ✅ Monorepo, docs, JSON schemas.
+- **Phase 1 — Working Vertical Slice** ✅ Simulator → gateway ingest → MCP stdio bridge → Oh-Ben-Claw brain adapter, end to end.
+- **Phase 2 — Command Transport & Persistent Config** ✅ Command poll/ack loop, capability groups, NVS-backed firmware config.
+- **Phase 3 — Real-Time Transport & AI Inference** ✅ MegaDetector inference pipeline (3A), MQTT bridge + firmware client (3B), OTA firmware updates (3C).
+- **Phase 4 — Cloud Storage Backend** ✅ S3/GCS/Noop stores; auto-upload with tracking; offline-first preserved.
+- **Phase 5 — Data Export & Dashboard** ✅ CSV exports, cloud upload retry, enriched operator dashboard.
+- **Phase 6 — Alert Rules & Webhooks** ✅ Persistent alert rules; webhook delivery; alert audit trail.
+- **Phase 7 — Multi-Tenant Foundation** ✅ Deployments, API key auth with ordered scopes.
+- **Phase 8 — Device Profiles & States** ✅ 10 device profiles with behavioral defaults; runtime states (armed, away, feeding…) with audit trail.
+- **Phase 9 — Schedule Engine** ✅ Cron-driven persistent scheduled actions (set state, toggle rules, webhooks).
+- **Phase 10 — Detection Zones & Privacy Masks** ✅ Normalised polygon zones; alert/record/ignore/privacy_mask actions.
+- **Phase 11 — Audio Pipeline** ✅ Audio capture, BirdNET/mock classification, storage, and tools.
+- **Phase 12 — Multi-Detector Orchestration** ✅ Detector registry with lazy loading; per-profile/per-device detector chains.
 
 ## Project Status at a Glance
 - Repository Skeleton: **Working**
 - JSON Schemas: **Working**
 - Node Simulator: **Working**
-- Gateway Service: **In Progress**
-- Firmware (ESP-IDF): **In Progress**
-- Brain Integration: **Planned**
-- Cloud Backend: **Planned**
+- Gateway Service: **Working** (FastAPI + SQLite; auth, inference, MQTT, OTA, alerts, schedules, zones, audio)
+- Firmware (ESP-IDF): **Working in simulation** (capture loop, deep sleep, command client, MQTT, OTA — pending field validation on hardware)
+- Brain Integration: **Working** (ClawCamAdapter: MCP stdio bridge, 23 auto-approved read tools, 9 approval-gated write tools)
+- Cloud Backend: **Working** (optional; S3/GCS; disabled by default)
 
 *For a more detailed view on progress tracking and milestones, check the [STATUS.md](docs/STATUS.md).*
-
----
-
-## Detailed Status and Roadmap
-
-### Current Repository State
-| Area                    | Status                | Notes                                                                 |
-|-------------------------|-----------------------|-----------------------------------------------------------------------|
-| Repository skeleton     | ✅ **Working**         | Monorepo layout established for modular development.                  |
-| JSON schemas            | ✅ **Working**         | Validation tests added for device and event contracts.                |
-| Node simulator          | ✅ **Working**         | Deterministic simulator generates schema-compatible payloads.         |
-| Gateway service         | 🔄 **In Progress**     | Local FastAPI gateway under testing; SQLite persistence validated.    |
-| Firmware (ESP-IDF)      | 🔄 **In Progress**     | Camera scaffolds prepared; field-ready deployment in development.     |
-| Brain integration       | 🔲 **Planned**         | Oh-Ben-Claw/MCP tools partially defined; awaiting gateway completion. |
-| Cloud backend           | 🔲 **Planned**         | Cloud postponed until local system achieves MVP status.               |
 
 #### Ground Rules:
 - No feature will be described as "Production-ready" until verified with tests and reproducible steps.
 
-### First Milestone:
-The first iteration targets a **simulator-based development loop**. Once real hardware is integrated, this milestone will close.
+### Next Milestone: Production Hardening (Phase 13)
+All software phases are simulator-verified. Phase 13 hardens them — MCP 2026-07-28 readiness, an evaluation harness as CI release gate, gateway observability, and a scoped approval model — executed in lockstep with Oh-Ben-Claw Phase 15 (see `NEXT_PHASE_PLAN.md`). Hardware integration (physical ESP32-S3-EYE field test) follows as Phase 14.
 
 ---
 
@@ -76,7 +66,7 @@ python -m clawcam_gateway.main
 ClawCam is built around three primary operational layers:
 1. **ClawCam Node**: Powered by ESP32 boards for motion-triggered capture and local storage.
 2. **ClawCam Gateway**: Offline-first field station running on Raspberry Pi or similar.
-3. **ClawCam Brain**: Centralized agent for fleet reasoning and task orchestration.
+3. **ClawCam Brain**: [Oh-Ben-Claw](https://github.com/thewriterben/Oh-Ben-Claw) agent consuming gateway tools via the MCP stdio bridge (`brain/oh-ben-claw-adapter/`), with read-only tools auto-approved and world-changing tools approval-gated.
 
 ### Repository Layout
 ```plaintext
