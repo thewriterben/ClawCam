@@ -35,3 +35,7 @@ dist/
 *.pem
 *.key
 secrets.h
+
+.claude/
+pytest-cache-files-*/
+.pytest_cache/
