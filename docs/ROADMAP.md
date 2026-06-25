@@ -99,13 +99,13 @@ The ClawCam roadmap is intentionally phased. Each phase must produce a working, 
 | Detector registry        | Name → factory mapping; lazy model loading; unavailable detectors skipped gracefully.                         | ✅ Completed  |
 | Detector chains          | Per-profile defaults + per-device overrides; one event runs multiple detectors; chain results queryable.      | ✅ Completed  |
 
-## Phase 13: Production Hardening (Next — lockstep with Oh-Ben-Claw Phase 15)
+## Phase 13: Production Hardening (Code-Complete — lockstep with Oh-Ben-Claw Phase 15)
 
-Executed as one coordinated phase with Oh-Ben-Claw (see `NEXT_PHASE_PLAN.md` in the workspace root). No new product surface area. Target window: June 8 – July 31, 2026.
+Executed as one coordinated phase with Oh-Ben-Claw (see `NEXT_PHASE_PLAN.md` in the workspace root). No new product surface area. Target window: June 8 – July 31, 2026. **All deliverables are code-complete and tested; the one remaining item is a calendar action — flipping the default `protocol_mode` to `stateless-2026` on July 28, 2026.**
 
 | Deliverable              | Acceptance Criteria                                                                                          | Status        |
 |--------------------------|--------------------------------------------------------------------------------------------------------------|---------------|
-| MCP 2026-07-28 readiness | stdio bridge + gateway audited against the breaking RC (stateless core); dual-mode behind config flag; cross-repo integration suite (brain ↔ adapter ↔ bridge ↔ gateway) passes in both modes; MCP surface verified behind plain HTTP with no session affinity. | 🔶 In progress — dual-mode + cross-repo suite ✅ (`tests/integration/test_phase15_cross_repo_mcp.py`, 17/17); only the Jul 28 default-flip remains |
+| MCP 2026-07-28 readiness | stdio bridge + gateway audited against the breaking RC (stateless core); dual-mode behind config flag; cross-repo integration suite (brain ↔ adapter ↔ bridge ↔ gateway) passes in both modes; MCP surface verified behind plain HTTP with no session affinity. | ✅ **Code-complete** — dual-mode bridge + gateway; cross-repo suite green (`tests/integration/test_phase15_cross_repo_mcp.py`, both modes), now part of the CI gate. Remaining: flip default `protocol_mode` to `stateless-2026` on Jul 28, 2026. |
 | Evaluation harness       | Golden flows on MockDetector: event → inference → alert linkage + determinism contract; full policy-partition eval (all 9 gated tools behaviorally ask; auto-approved never do); `tests/evals` in pytest testpaths = CI release gate. | ✅ **Working** (7/7) |
 | Observability            | tool_call_audit table written at the dispatch_tool chokepoint (both MCP-stdio and REST tagged by source; SHA-256 args hash; latency; never blocks dispatch); GET /api/v1/metrics (entity counts + per-tool calls/errors/avg latency); GET /api/v1/tool-audit. | ✅ **Working** (4 tests; 38/38 with regression scope) |
 | Approval-model upgrade   | ToolPolicy adopts call/session/forever scope vocabulary shared with Oh-Ben-Claw; plan-mode approval with argument bounds honored by ClawCamAdapter; approval audit trail. | ✅ **Done** (WS6 scopes + plan-mode/ArgumentBound, lockstep with OBC `ApprovedPlan`) |
@@ -121,7 +121,7 @@ Executed as one coordinated phase with Oh-Ben-Claw (see `NEXT_PHASE_PLAN.md` in 
 - **Phase 0**: Completed
 - **Phases 1–2**: Completed (Q2 2026)
 - **Phases 3–12**: Completed (Q2 2026)
-- **Phase 13 (Production Hardening)**: June 8 – July 31, 2026 (lockstep with Oh-Ben-Claw Phase 15)
+- **Phase 13 (Production Hardening)**: June 8 – July 31, 2026 (lockstep with Oh-Ben-Claw Phase 15) — code-complete; default protocol flip scheduled for Jul 28, 2026
 - **Phase 14 (Hardware Integration)**: Target Q3–Q4 2026
 
 ---

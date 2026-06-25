@@ -2,7 +2,7 @@
 
 This document is the source of truth for current implementation maturity. ClawCam tracks progress for **working code**, **scaffolds**, **frameworks**, and **planned features**.
 
-## Current Repository State (Phase 12 Complete)
+## Current Repository State (Phase 13 Complete)
 
 | Area                            | Status             | Notes                                                                                         |
 |---------------------------------|--------------------|-----------------------------------------------------------------------------------------------|
@@ -295,18 +295,24 @@ Phase 12 lets one event run a chain of models instead of a single detector:
 6. **MCP tools**: `list_detectors`, `get_device_detector_chain`, `get_event_inference_chain`
    (auto-approved); `set_device_detector_chain` (approval-gated).
 
-## Next Milestone: Production Hardening (Phase 13)
+## Phase 13 Complete — Production Hardening (lockstep with Oh-Ben-Claw Phase 15)
 
-Lockstep with Oh-Ben-Claw Phase 15; see `NEXT_PHASE_PLAN.md` in the workspace root.
+All Phase 13 deliverables are code-complete and tested (see `NEXT_PHASE_PLAN.md`):
 
-- MCP 2026-07-28 readiness: dual-mode stdio bridge + gateway; cross-repo integration suite in both modes
-- Evaluation harness on deterministic mocks as a CI release gate
-- Gateway observability: tool-call audit log, metrics endpoint, dashboard funnel
-- Approval-model upgrade: call/session/forever scopes shared with Oh-Ben-Claw
+1. **MCP 2026-07-28 readiness**: dual-mode stdio bridge + gateway (`legacy-2024` / `stateless-2026`);
+   cross-repo integration suite green in both modes (`tests/integration/test_phase15_cross_repo_mcp.py`)
+   and now part of the CI gate. One calendar action remains: flip the default `protocol_mode` to
+   `stateless-2026` on July 28, 2026.
+2. **Evaluation harness**: golden flows on MockDetector + full policy-partition eval; `tests/evals` is a CI release gate.
+3. **Observability**: `tool_call_audit` at the dispatch chokepoint; `GET /api/v1/metrics`; `GET /api/v1/tool-audit`.
+4. **Approval-model upgrade**: call/session/forever scopes + plan-mode argument bounds, wire-compatible with Oh-Ben-Claw.
+5. **CI gate widened**: `tests/integration` added to pytest testpaths; full gated suite green (678 passed).
+6. **Repo hygiene**: `.gitattributes` normalizes line endings to LF; simulator emits canonical `cap_clawcam_*` capabilities.
 
-## Following Milestone: Hardware Integration (Phase 14)
+## Next Milestone: Hardware Integration (Phase 14)
 
 - Deploy on physical ESP32-S3-EYE; end-to-end field test with real PIR triggers and JPEG captures
 - Validate MQTT connectivity and OTA firmware update on device
+- See `docs/PHASE14_FIELD_TEST_PLAN.md` for the detailed runbook
 
 ---
