@@ -21,6 +21,7 @@ ClawCam’s development is intentionally phased to ensure each milestone deliver
 - **Phase 10 — Detection Zones & Privacy Masks** ✅ Normalised polygon zones; alert/record/ignore/privacy_mask actions.
 - **Phase 11 — Audio Pipeline** ✅ Audio capture, BirdNET/mock classification, storage, and tools.
 - **Phase 12 — Multi-Detector Orchestration** ✅ Detector registry with lazy loading; per-profile/per-device detector chains.
+- **Phase 13 — Production Hardening** ✅ Dual-mode MCP (legacy-2024/stateless-2026) + cross-repo integration suite, evaluation harness as CI gate, tool-call observability (`/api/v1/metrics`, `/ops`), call/session/forever approval scopes + plan-mode, and a security pass (webhook SSRF guard, upload hardening). One calendar action remains (default protocol flip, Jul 28 2026).
 
 ## Project Status at a Glance
 - Repository Skeleton: **Working**
@@ -36,8 +37,8 @@ ClawCam’s development is intentionally phased to ensure each milestone deliver
 #### Ground Rules:
 - No feature will be described as "Production-ready" until verified with tests and reproducible steps.
 
-### Next Milestone: Production Hardening (Phase 13)
-All software phases are simulator-verified. Phase 13 hardens them — MCP 2026-07-28 readiness, an evaluation harness as CI release gate, gateway observability, and a scoped approval model — executed in lockstep with Oh-Ben-Claw Phase 15 (see `NEXT_PHASE_PLAN.md`). Hardware integration (physical ESP32-S3-EYE field test) follows as Phase 14.
+### Next Milestone: Hardware Integration (Phase 14)
+All software phases are simulator-verified and Phase 13 production hardening is code-complete (lockstep with Oh-Ben-Claw Phase 15; see `NEXT_PHASE_PLAN.md`). Next is Phase 14 — deploying on a physical ESP32-S3-EYE for an end-to-end field test (real PIR triggers, JPEG capture, MQTT, OTA). See [`docs/PHASE14_FIELD_TEST_PLAN.md`](docs/PHASE14_FIELD_TEST_PLAN.md) for the runbook.
 
 ---
 
@@ -58,6 +59,21 @@ python -m clawcam_gateway.main
    ```bash
    python -m clawcam_gateway.simulator.cli
    ```
+- **Operator dashboards**: with the gateway running, open `http://localhost:8080/dashboard`
+  (server-rendered snapshot) or `http://localhost:8080/ops` (live, self-refreshing SPA that
+  polls the JSON API — KPIs, top species, device health, tool-call funnel).
+
+### Testing & quality gates:
+The CI release gate is defined by `testpaths` in `gateway/pyproject.toml`. Run the full suite
+(gateway, schemas, evals, integration, firmware) locally from the `gateway/` directory:
+```bash
+cd gateway && PYTHONPATH=$PWD:$PWD/../brain/oh-ben-claw-adapter pytest
+```
+Lint and type-check (also enforced in CI and via `.pre-commit-config.yaml`):
+```bash
+ruff check --config gateway/pyproject.toml gateway/clawcam_gateway brain/oh-ben-claw-adapter
+cd gateway && mypy clawcam_gateway
+```
 
 ---
 
