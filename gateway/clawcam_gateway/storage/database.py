@@ -387,14 +387,15 @@ class GatewayDatabase:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO devices (device_id, device_type, name, status, payload_json, created_at, last_seen_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO devices (device_id, device_type, name, status, payload_json, created_at, last_seen_at, deployment_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(device_id) DO UPDATE SET
                     device_type = excluded.device_type,
                     name = excluded.name,
                     status = excluded.status,
                     payload_json = excluded.payload_json,
-                    last_seen_at = excluded.last_seen_at
+                    last_seen_at = excluded.last_seen_at,
+                    deployment_id = excluded.deployment_id
                 """,
                 (
                     payload["device_id"],
@@ -404,6 +405,7 @@ class GatewayDatabase:
                     json.dumps(payload, sort_keys=True),
                     payload["created_at"],
                     payload.get("last_seen_at"),
+                    payload.get("deployment_id", "default"),
                 ),
             )
 
@@ -411,8 +413,8 @@ class GatewayDatabase:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO events (event_id, event_type, device_id, timestamp, source, payload_json)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO events (event_id, event_type, device_id, timestamp, source, payload_json, deployment_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload["event_id"],
@@ -421,6 +423,7 @@ class GatewayDatabase:
                     payload["timestamp"],
                     payload["source"],
                     json.dumps(payload, sort_keys=True),
+                    payload.get("deployment_id", "default"),
                 ),
             )
             for media in payload.get("media", []):
@@ -467,12 +470,18 @@ class GatewayDatabase:
             ).fetchone()
         return json.loads(row["payload_json"]) if row else None
 
-    def recent_events(self, limit: int = 25) -> list[dict[str, Any]]:
+    def recent_events(self, limit: int = 25, deployment_id: str | None = None) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            rows = conn.execute(
-                "SELECT payload_json FROM events ORDER BY timestamp DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            if deployment_id is None:
+                rows = conn.execute(
+                    "SELECT payload_json FROM events ORDER BY timestamp DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT payload_json FROM events WHERE deployment_id = ? ORDER BY timestamp DESC LIMIT ?",
+                    (deployment_id, limit),
+                ).fetchall()
         return [json.loads(row["payload_json"]) for row in rows]
 
     def get_device(self, device_id: str) -> dict[str, Any] | None:
@@ -502,11 +511,17 @@ class GatewayDatabase:
                 pass
         return payload
 
-    def list_devices(self) -> list[dict[str, Any]]:
+    def list_devices(self, deployment_id: str | None = None) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            rows = conn.execute(
-                "SELECT payload_json FROM devices ORDER BY name ASC, device_id ASC"
-            ).fetchall()
+            if deployment_id is None:
+                rows = conn.execute(
+                    "SELECT payload_json FROM devices ORDER BY name ASC, device_id ASC"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT payload_json FROM devices WHERE deployment_id = ? ORDER BY name ASC, device_id ASC",
+                    (deployment_id,),
+                ).fetchall()
         return [json.loads(row["payload_json"]) for row in rows]
 
     def add_pending_command(self, command: dict[str, Any]) -> None:

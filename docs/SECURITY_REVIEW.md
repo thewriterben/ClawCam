@@ -35,14 +35,24 @@ The upload handlers buffered the whole body with no cap. Added `MAX_MEDIA_BYTES`
 
 ## Recommended (deferred)
 
-### H4 — Auth coverage & multi-tenant scoping
+### H4 — Auth coverage & multi-tenant scoping (Partially fixed)
 Auth is disabled by default (`CLAWCAM_AUTH_ENABLED=false`) — an intentional choice for
-single-user field gateways (see `docs/STATUS.md`, Phase 7). When enabled, several read/listing
-endpoints are not filtered by `deployment_id`, so one tenant's key can read another tenant's
-devices/events/detections. Recommended follow-up (a deliberate, test-heavy change, not bundled
-here): add `Depends(require_write)`/`require_read` to the upload and data endpoints and thread
-`auth.deployment_id` into the listing queries; consider defaulting auth on when bound to a
-non-loopback interface.
+single-user field gateways (see `docs/STATUS.md`, Phase 7), so these protections are latent
+until auth is enabled.
+
+**Fixed:** all mutating endpoints now require the `write` scope —
+`POST /events|/health|/devices|/media/{id}|/audio/{id}|/firmware|/alert-rules|/cloud/retry`,
+`PATCH|DELETE /alert-rules/{id}`, and `POST /commands/{id}/ack` — closing the unauthenticated
+data-injection / file-write hole (which compounded H2/H3). Tenant read-scoping is implemented
+end-to-end for devices and events: `deployment_id` is now persisted on insert and the
+`GET /devices` and `GET /detections/recent` listings filter to the caller's deployment, while
+admins (and the auth-disabled synthetic admin) still see all tenants. Covered by new tests in
+`tests/gateway/test_phase7_auth.py`.
+
+**Remaining:** apply the same `_deployment_scope(auth)` filter to the other tenant-data reads
+(`/inference/recent`, `/alerts`, `/export/*`, per-event/-device reads), wiring `deployment_id`
+into `list_inference_results` / `list_alert_events` at insert time as was done for devices and
+events. Also consider defaulting auth on when bound to a non-loopback interface.
 
 ### M2 — API-key hash
 Tokens are high-entropy (`secrets.token_urlsafe(32)`) and stored as bare SHA-256, looked up by

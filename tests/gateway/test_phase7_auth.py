@@ -524,6 +524,39 @@ class TestAuthEnabled:
 
 # ── Backward compatibility ────────────────────────────────────────────────────
 
+
+    # ── H4: auth coverage on mutating endpoints + tenant read scoping ──────────
+    def test_write_endpoint_401_without_key(self, client_auth):
+        client, _ = client_auth
+        resp = client.post("/api/v1/events", json={"data": {"event_id": "e1"}})
+        assert resp.status_code == 401
+
+    def test_write_endpoint_403_with_read_key(self, client_auth):
+        client, db = client_auth
+        token = self._add_user_key(db, scope="read")
+        resp = client.post("/api/v1/events", json={"data": {"event_id": "e1"}},
+                           headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 403
+
+    def test_devices_list_scoped_to_own_deployment(self, client_auth):
+        client, db = client_auth
+        for dep, did in [("dep-a", "dev-a"), ("dep-b", "dev-b")]:
+            db.add_deployment({"deployment_id": dep, "name": dep})
+            db.upsert_device({
+                "device_id": did, "device_type": "node", "name": did,
+                "status": "active", "created_at": "2026-05-12T00:00:00Z",
+                "deployment_id": dep,
+            })
+        read_tok = self._add_user_key(db, scope="read", deployment_id="dep-a")
+        body = client.get("/api/v1/devices",
+                          headers={"Authorization": f"Bearer {read_tok}"}).json()
+        assert {d["device_id"] for d in body["devices"]} == {"dev-a"}
+        # admin (and auth-disabled) see all deployments
+        admin_tok = self._bootstrap_admin_key(db)
+        body2 = client.get("/api/v1/devices",
+                           headers={"Authorization": f"Bearer {admin_tok}"}).json()
+        assert {"dev-a", "dev-b"} <= {d["device_id"] for d in body2["devices"]}
+
 class TestBackwardCompatibility:
     def test_existing_devices_endpoint_works_without_auth(self, client_no_auth):
         """When auth is disabled, /api/v1/devices should be open as before."""

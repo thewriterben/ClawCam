@@ -27,6 +27,7 @@ from clawcam_gateway.api.dashboard import render_dashboard
 from clawcam_gateway.api.ops_dashboard import render_ops_dashboard
 from clawcam_gateway.auth import (
     AuthContext,
+    SCOPE_ADMIN,
     SCOPES,
     auth_response_payload,
     generate_api_key,
@@ -87,6 +88,11 @@ def _safe_suffix(filename: str | None, allowed: tuple[str, ...], default: str) -
     """Return a lowercased extension from *filename* if in *allowed*, else *default*."""
     suffix = Path(filename or "").suffix.lower()
     return suffix if suffix in allowed else default
+
+
+def _deployment_scope(auth: AuthContext) -> str | None:
+    """Tenant filter for reads: None (all) for admin or auth-disabled, else own deployment."""
+    return None if auth.scope == SCOPE_ADMIN else auth.deployment_id
 
 
 def create_app(config: GatewayConfig | None = None) -> FastAPI:
@@ -415,6 +421,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         event_id: str,
         file: UploadFile,
         background_tasks: BackgroundTasks,
+        auth: AuthContext = Depends(require_write),
     ) -> dict[str, Any]:
         """Accept a WAV/OGG/MP3 from a node and run classifiers in the background."""
         event_row = db.get_event(event_id)
@@ -692,7 +699,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         return {"ok": True, "transitions": transitions, "count": len(transitions)}
 
     @app.post("/api/v1/devices")
-    def register_device(payload: Payload) -> dict[str, Any]:
+    def register_device(payload: Payload, auth: AuthContext = Depends(require_write)) -> dict[str, Any]:
         try:
             validate_device(payload.data)
             db.upsert_device(payload.data)
@@ -701,12 +708,12 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         return {"ok": True, "device_id": payload.data["device_id"]}
 
     @app.get("/api/v1/devices")
-    def list_devices() -> dict[str, Any]:
-        devices = db.list_devices()
+    def list_devices(auth: AuthContext = Depends(get_auth_context)) -> dict[str, Any]:
+        devices = db.list_devices(deployment_id=_deployment_scope(auth))
         return {"devices": devices, "count": len(devices)}
 
     @app.post("/api/v1/events")
-    def ingest_event(payload: Payload) -> dict[str, Any]:
+    def ingest_event(payload: Payload, auth: AuthContext = Depends(require_write)) -> dict[str, Any]:
         try:
             validate_event(payload.data)
             if db.get_device(payload.data["device_id"]) is None:
@@ -717,7 +724,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         return {"ok": True, "event_id": payload.data["event_id"]}
 
     @app.post("/api/v1/health")
-    def ingest_health(payload: Payload) -> dict[str, Any]:
+    def ingest_health(payload: Payload, auth: AuthContext = Depends(require_write)) -> dict[str, Any]:
         try:
             validate_health(payload.data)
             if db.get_device(payload.data["device_id"]) is None:
@@ -728,9 +735,9 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         return {"ok": True, "device_id": payload.data["device_id"]}
 
     @app.get("/api/v1/detections/recent")
-    def recent_detections(limit: int = 25) -> dict[str, Any]:
+    def recent_detections(limit: int = 25, auth: AuthContext = Depends(get_auth_context)) -> dict[str, Any]:
         limit = max(1, min(limit, 100))
-        return {"detections": db.recent_events(limit=limit), "limit": limit}
+        return {"detections": db.recent_events(limit=limit, deployment_id=_deployment_scope(auth)), "limit": limit}
 
     @app.get("/api/v1/devices/{device_id}/health")
     def device_health(device_id: str) -> dict[str, Any]:
@@ -754,7 +761,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         return {"ok": True, "device_id": device_id, "commands": commands, "count": len(commands)}
 
     @app.post("/api/v1/commands/{command_id}/ack")
-    def ack_command(command_id: str, ack: CommandAck) -> dict[str, Any]:
+    def ack_command(command_id: str, ack: CommandAck, auth: AuthContext = Depends(require_write)) -> dict[str, Any]:
         """Node reports execution result for a delivered command."""
         allowed = {"executed", "failed", "skipped"}
         if ack.status not in allowed:
@@ -779,6 +786,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         event_id: str,
         file: UploadFile,
         background_tasks: BackgroundTasks,
+        auth: AuthContext = Depends(require_write),
     ) -> dict[str, Any]:
         """Accept a JPEG/PNG image from a node and trigger inference in the background.
 
@@ -885,7 +893,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     # ── Alert rules (Phase 6) ────────────────────────────────────────────
 
     @app.post("/api/v1/alert-rules")
-    def create_alert_rule(payload: Payload) -> dict[str, Any]:
+    def create_alert_rule(payload: Payload, auth: AuthContext = Depends(require_write)) -> dict[str, Any]:
         """Create a new alert rule. Returns the created rule with its rule_id."""
         import uuid as _uuid_mod
         from datetime import datetime as _dt, timezone as _tz
@@ -921,7 +929,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         return {"ok": True, "rule": rule}
 
     @app.patch("/api/v1/alert-rules/{rule_id}")
-    def update_alert_rule(rule_id: str, payload: Payload) -> dict[str, Any]:
+    def update_alert_rule(rule_id: str, payload: Payload, auth: AuthContext = Depends(require_write)) -> dict[str, Any]:
         """Partially update an alert rule (enabled/disabled, webhook_url, etc.)."""
         updated = db.update_alert_rule(rule_id, payload.data)
         if not updated:
@@ -929,7 +937,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         return {"ok": True, "rule_id": rule_id, "updated": list(payload.data.keys())}
 
     @app.delete("/api/v1/alert-rules/{rule_id}")
-    def delete_alert_rule(rule_id: str) -> dict[str, Any]:
+    def delete_alert_rule(rule_id: str, auth: AuthContext = Depends(require_write)) -> dict[str, Any]:
         """Delete an alert rule permanently."""
         deleted = db.delete_alert_rule(rule_id)
         if not deleted:
@@ -994,7 +1002,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     # ── Cloud retry (Phase 5) ────────────────────────────────────────────
 
     @app.post("/api/v1/cloud/retry")
-    def retry_failed_uploads(background_tasks: BackgroundTasks) -> dict[str, Any]:
+    def retry_failed_uploads(background_tasks: BackgroundTasks, auth: AuthContext = Depends(require_write)) -> dict[str, Any]:
         """Re-queue all failed cloud uploads for retry in the background."""
         failed = db.list_cloud_uploads(status="failed", limit=500)
         for upload in failed:
@@ -1013,7 +1021,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     # ── Firmware OTA (Phase 3C) ───────────────────────────────────────────
 
     @app.post("/api/v1/firmware")
-    async def upload_firmware(file: UploadFile) -> dict[str, Any]:
+    async def upload_firmware(file: UploadFile, auth: AuthContext = Depends(require_write)) -> dict[str, Any]:
         """Upload a firmware .bin image. Returns build_id, sha256, and download URL.
 
         The node uses the download URL in the firmware_update command payload.
