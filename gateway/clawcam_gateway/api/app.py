@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import hashlib
+import re
 import uuid as _uuid
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, UploadFile
@@ -71,6 +72,23 @@ class CommandAck(BaseModel):
     result: dict[str, Any] = Field(default_factory=dict)
 
 
+# Upload safety limits and filename validation (SSRF/traversal/DoS hardening).
+MAX_MEDIA_BYTES = 50 * 1024 * 1024       # 50 MB cap for image/audio uploads
+MAX_FIRMWARE_BYTES = 32 * 1024 * 1024    # 32 MB cap for firmware .bin uploads
+_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def _safe_path_component(value: str) -> bool:
+    """True if *value* is a safe single path component (no traversal)."""
+    return bool(_SAFE_ID_RE.match(value)) and ".." not in value and "/" not in value and "\\" not in value
+
+
+def _safe_suffix(filename: str | None, allowed: tuple[str, ...], default: str) -> str:
+    """Return a lowercased extension from *filename* if in *allowed*, else *default*."""
+    suffix = Path(filename or "").suffix.lower()
+    return suffix if suffix in allowed else default
+
+
 def create_app(config: GatewayConfig | None = None) -> FastAPI:
     config = config or GatewayConfig.from_env()
     db = GatewayDatabase(config.database_path)
@@ -78,8 +96,9 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     inference_orchestrator = InferenceOrchestrator(db=db, enabled=config.inference_enabled)
     cloud_store = get_cloud_store(config)
     cloud_worker = CloudUploadWorker(db=db, store=cloud_store)
-    alert_evaluator = AlertEvaluator(db=db, default_webhook=config.alert_webhook_url)
-    schedule_engine = ScheduleEngine(db=db)
+    alert_evaluator = AlertEvaluator(db=db, default_webhook=config.alert_webhook_url,
+                                     allow_private_hosts=config.webhook_allow_private_hosts)
+    schedule_engine = ScheduleEngine(db=db, allow_private_hosts=config.webhook_allow_private_hosts)
     audio_pipeline = AudioPipeline(db=db, enabled=config.audio_enabled)
     bridge = MQTTBridge(
         db=db,
@@ -402,11 +421,17 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         if event_row is None:
             raise HTTPException(status_code=404, detail=f"unknown event: {event_id}")
 
+        if not _safe_path_component(event_id):
+            raise HTTPException(status_code=400, detail="invalid event_id")
         audio_dir = config.media_dir / "audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
-        suffix = Path(file.filename or "clip.wav").suffix or ".wav"
-        dest = audio_dir / f"{event_id}{suffix}"
+        suffix = _safe_suffix(file.filename, (".wav", ".ogg", ".mp3", ".flac"), ".wav")
         content = await file.read()
+        if len(content) > MAX_MEDIA_BYTES:
+            raise HTTPException(status_code=413, detail="audio upload exceeds size limit")
+        dest = (audio_dir / f"{event_id}{suffix}").resolve()
+        if not dest.is_relative_to(audio_dir.resolve()):
+            raise HTTPException(status_code=400, detail="invalid audio path")
         dest.write_bytes(content)
 
         audio_id = db.add_audio_upload({
@@ -765,11 +790,17 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             # Already processed; accept the upload but skip re-inference
             return {"ok": True, "event_id": event_id, "inference": "already_processed"}
 
+        if not _safe_path_component(event_id):
+            raise HTTPException(status_code=400, detail="invalid event_id")
         # Save the uploaded file into the configured media directory
         config.media_dir.mkdir(parents=True, exist_ok=True)
-        suffix = Path(file.filename or "image.jpg").suffix or ".jpg"
-        dest = config.media_dir / f"{event_id}{suffix}"
+        suffix = _safe_suffix(file.filename, (".jpg", ".jpeg", ".png"), ".jpg")
         content = await file.read()
+        if len(content) > MAX_MEDIA_BYTES:
+            raise HTTPException(status_code=413, detail="media upload exceeds size limit")
+        dest = (config.media_dir / f"{event_id}{suffix}").resolve()
+        if not dest.is_relative_to(config.media_dir.resolve()):
+            raise HTTPException(status_code=400, detail="invalid media path")
         dest.write_bytes(content)
 
         # Phase 10: apply privacy masks if any zones with action='privacy_mask'
@@ -991,19 +1022,24 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         content = await file.read()
         if not content:
             raise HTTPException(status_code=400, detail="empty firmware file")
+        if len(content) > MAX_FIRMWARE_BYTES:
+            raise HTTPException(status_code=413, detail="firmware upload exceeds size limit")
 
         sha256 = hashlib.sha256(content).hexdigest()
         build_id = _uuid.uuid4().hex[:16]
-        original_name = file.filename or "firmware.bin"
-        safe_name = f"{build_id}_{original_name}"
+        # Use only the basename and strip anything outside a safe charset (no traversal).
+        base_name = re.sub(r"[^A-Za-z0-9._-]", "_", Path(file.filename or "firmware.bin").name) or "firmware.bin"
+        safe_name = f"{build_id}_{base_name}"
 
         fw_dir = config.media_dir / "firmware"
         fw_dir.mkdir(parents=True, exist_ok=True)
-        dest = fw_dir / safe_name
+        dest = (fw_dir / safe_name).resolve()
+        if not dest.is_relative_to(fw_dir.resolve()):
+            raise HTTPException(status_code=400, detail="invalid firmware path")
         dest.write_bytes(content)
 
         # Extract version from filename if present (e.g. "clawcam-node-0.2.0.bin")
-        stem = Path(original_name).stem
+        stem = Path(base_name).stem
         version = stem.split("-")[-1] if "-" in stem else stem
 
         db.add_firmware_build(build_id, version, safe_name, sha256, len(content))

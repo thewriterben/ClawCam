@@ -248,7 +248,7 @@ class TestAlertRuleMatches:
 class TestDeliverWebhook:
     def test_success(self, webhook_server):
         cap, url = webhook_server
-        ok, status, error = deliver_webhook(url, {"test": "payload"})
+        ok, status, error = deliver_webhook(url, {"test": "payload"}, allow_private=True)
         assert ok is True
         assert status == 200
         assert error is None
@@ -261,13 +261,13 @@ class TestDeliverWebhook:
         assert status is None
 
     def test_unreachable_url_returns_failure(self):
-        ok, status, error = deliver_webhook("http://127.0.0.1:1/", {"x": 1}, timeout=1)
+        ok, status, error = deliver_webhook("http://127.0.0.1:1/", {"x": 1}, timeout=1, allow_private=True)
         assert ok is False
 
     def test_payload_is_json(self, webhook_server):
         cap, url = webhook_server
         payload = {"event_id": "evt-1", "label": "animal", "confidence": 0.91}
-        deliver_webhook(url, payload)
+        deliver_webhook(url, payload, allow_private=True)
         assert cap.received[0]["event_id"] == "evt-1"
 
 
@@ -326,7 +326,7 @@ class TestAlertEvaluator:
             "webhook_url": url,
             "enabled": True,
         })
-        evaluator = AlertEvaluator(tmp_db)
+        evaluator = AlertEvaluator(tmp_db, allow_private_hosts=True)
         evaluator.evaluate("evt-alert-001", device_id="alert-dev-1")
         events = tmp_db.list_alert_events()
         assert events[0]["delivery_status"] == "delivered"
@@ -342,7 +342,7 @@ class TestAlertEvaluator:
             "webhook_url": None,
             "enabled": True,
         })
-        evaluator = AlertEvaluator(tmp_db, default_webhook=url)
+        evaluator = AlertEvaluator(tmp_db, default_webhook=url, allow_private_hosts=True)
         evaluator.evaluate("evt-alert-001", device_id="alert-dev-1")
         assert len(cap.received) == 1
 

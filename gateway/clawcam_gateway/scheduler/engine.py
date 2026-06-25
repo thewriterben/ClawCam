@@ -91,6 +91,7 @@ class ScheduleEngine:
     """
 
     def __init__(self, db: "GatewayDatabase", webhook_deliverer=None,
+                 allow_private_hosts: bool = False,
                  tick_interval_s: int = 30):
         self._db = db
         self._tick_interval = tick_interval_s
@@ -98,7 +99,9 @@ class ScheduleEngine:
         self._thread: threading.Thread | None = None
         if webhook_deliverer is None:
             from clawcam_gateway.alerts.webhook import deliver_webhook
-            webhook_deliverer = deliver_webhook
+
+            def webhook_deliverer(url, body):
+                return deliver_webhook(url, body, allow_private=allow_private_hosts)
         self._deliver_webhook = webhook_deliverer
 
     # ── Lifecycle ──────────────────────────────────────────────────────────

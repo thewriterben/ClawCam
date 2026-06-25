@@ -30,9 +30,11 @@ class AlertEvaluator:
                          Used when a rule has no individual webhook_url.
     """
 
-    def __init__(self, db: "GatewayDatabase", default_webhook: str | None = None):
+    def __init__(self, db: "GatewayDatabase", default_webhook: str | None = None,
+                 allow_private_hosts: bool = False):
         self._db = db
         self._default_webhook = default_webhook or ""
+        self._allow_private_hosts = allow_private_hosts
 
     def evaluate(self, event_id: str, device_id: str | None = None) -> int:
         """Check all enabled rules against the inference result for *event_id*.
@@ -120,7 +122,10 @@ class AlertEvaluator:
         url = rule.webhook_url or self._default_webhook
         payload = _build_payload(alert_event_id, rule, result, event_id, device_id, fired_at)
 
-        success, status_code, error = deliver_webhook(url, payload) if url else (False, None, "no url")
+        success, status_code, error = (
+            deliver_webhook(url, payload, allow_private=self._allow_private_hosts)
+            if url else (False, None, "no url")
+        )
 
         delivery_status = "delivered" if success else "failed"
         webhook_response = str(status_code) if status_code is not None else (error or "no url")

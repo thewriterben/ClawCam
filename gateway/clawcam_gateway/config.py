@@ -34,6 +34,7 @@ class GatewayConfig:
     cloud_endpoint_url: str | None = None  # custom endpoint for MinIO / LocalStack
     # Alerting (webhook notifications on inference results)
     alert_webhook_url: str | None = None  # global default; rules may override per-rule
+    webhook_allow_private_hosts: bool = False  # allow webhook delivery to private/loopback IPs (LAN/dev)
     # Authentication and multi-tenancy (Phase 7)
     auth_enabled: bool = False           # off by default; existing deployments unaffected
     default_deployment_id: str = "default"
@@ -69,6 +70,7 @@ class GatewayConfig:
             cloud_region=os.getenv("CLAWCAM_CLOUD_REGION"),
             cloud_endpoint_url=os.getenv("CLAWCAM_CLOUD_ENDPOINT_URL"),
             alert_webhook_url=os.getenv("CLAWCAM_ALERT_WEBHOOK_URL") or None,
+            webhook_allow_private_hosts=os.getenv("CLAWCAM_WEBHOOK_ALLOW_PRIVATE_HOSTS", "").lower() in ("1", "true", "yes"),
             auth_enabled=os.getenv("CLAWCAM_AUTH_ENABLED", "false").lower() == "true",
             default_deployment_id=os.getenv("CLAWCAM_DEFAULT_DEPLOYMENT", "default"),
             scheduler_enabled=os.getenv("CLAWCAM_SCHEDULER_ENABLED", "false").lower() == "true",
