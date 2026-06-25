@@ -122,13 +122,61 @@ class MockAudioClassifier(BaseAudioClassifier):
         ]
 
 
+class CompositeAudioClassifier(BaseAudioClassifier):
+    """Runs several audio classifiers and concatenates their hits.
+
+    Available when ANY sub-classifier is available; each call is wrapped so one
+    classifier failing cannot abort the others. Lets a single clip be scored for
+    both species ID (BirdNET) and alarm events (YAMNet glass-break).
+    """
+
+    name = "composite_audio"
+    version = "0.1.0"
+
+    def __init__(self, classifiers: list[BaseAudioClassifier]):
+        self._classifiers = list(classifiers)
+
+    @property
+    def is_available(self) -> bool:
+        return any(c.is_available for c in self._classifiers)
+
+    def classify(self, audio_path: str | Path) -> list[AudioClassification]:
+        results: list[AudioClassification] = []
+        for c in self._classifiers:
+            if not c.is_available:
+                continue
+            try:
+                results.extend(c.classify(audio_path))
+            except Exception as exc:  # noqa: BLE001 - one failure must not abort the rest
+                logger.warning("CompositeAudioClassifier: %s raised: %s", c.name, exc)
+        return results
+
+
 def get_default_classifier() -> BaseAudioClassifier:
-    """Return the best available audio classifier (BirdNET > Mock)."""
+    """Return the best available audio classifier.
+
+    Composes every available real classifier (BirdNET species ID + YAMNet
+    alarm events); returns a single one if only one is available, or the
+    deterministic mock when none are (e.g. in CI / model-less gateways).
+    """
+    reals: list[BaseAudioClassifier] = []
+    candidate: BaseAudioClassifier
     try:
         from clawcam_gateway.audio.birdnet import BirdNETClassifier
         candidate = BirdNETClassifier()
         if candidate.is_available:
-            return candidate
+            reals.append(candidate)
     except Exception as exc:  # noqa: BLE001 - BirdNET is optional
-        logger.debug("BirdNET unavailable, falling back to mock: %s", exc)
+        logger.debug("BirdNET unavailable: %s", exc)
+    try:
+        from clawcam_gateway.audio.glassbreak import GlassBreakClassifier
+        candidate = GlassBreakClassifier()
+        if candidate.is_available:
+            reals.append(candidate)
+    except Exception as exc:  # noqa: BLE001 - YAMNet is optional
+        logger.debug("GlassBreak/YAMNet unavailable: %s", exc)
+    if len(reals) == 1:
+        return reals[0]
+    if reals:
+        return CompositeAudioClassifier(reals)
     return MockAudioClassifier()

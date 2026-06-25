@@ -73,3 +73,19 @@ stem = person name); with no enrollment, faces are detected but reported as
 zones and confirm it is lawful for your deployment before enabling. Encodings are
 computed locally; no image leaves the device. Validate on-device in the Phase 14
 field test.
+
+## Acoustic alarm events (`glass_break` / YAMNet)
+
+The `GlassBreakClassifier` (`gateway/clawcam_gateway/audio/glassbreak.py`) is an
+**audio** classifier (not a visual detector) for the indoor-security profile. It
+runs YAMNet over an uploaded clip and maps AudioSet classes to ClawCam labels:
+`glass_break`, `alarm`, `scream`, `gunshot`. It is **availability-gated** on the
+model stack — until `pip install "clawcam-gateway[audio]"` (tensorflow,
+tensorflow-hub, soundfile) the audio pipeline falls back to BirdNET/mock.
+
+`tensorflow_hub.load` caches the YAMNet model on first use (one-time download).
+`get_default_classifier()` composes every available real audio classifier
+(BirdNET species ID + YAMNet alarm events) via `CompositeAudioClassifier`, so a
+single clip can yield both bird species and alarm-event hits; with no models
+installed it returns the deterministic mock. Validate on-device in the Phase 14
+field test.
