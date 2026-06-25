@@ -105,10 +105,10 @@ Executed as one coordinated phase with Oh-Ben-Claw (see `NEXT_PHASE_PLAN.md` in 
 
 | Deliverable              | Acceptance Criteria                                                                                          | Status        |
 |--------------------------|--------------------------------------------------------------------------------------------------------------|---------------|
-| MCP 2026-07-28 readiness | stdio bridge + gateway audited against the breaking RC (stateless core); dual-mode behind config flag; cross-repo integration suite (brain ↔ adapter ↔ bridge ↔ gateway) passes in both modes; MCP surface verified behind plain HTTP with no session affinity. | 🔲 Planned    |
+| MCP 2026-07-28 readiness | stdio bridge + gateway audited against the breaking RC (stateless core); dual-mode behind config flag; cross-repo integration suite (brain ↔ adapter ↔ bridge ↔ gateway) passes in both modes; MCP surface verified behind plain HTTP with no session affinity. | 🔶 In progress — dual-mode + cross-repo suite ✅ (`tests/integration/test_phase15_cross_repo_mcp.py`, 17/17); only the Jul 28 default-flip remains |
 | Evaluation harness       | Golden flows on MockDetector: event → inference → alert linkage + determinism contract; full policy-partition eval (all 9 gated tools behaviorally ask; auto-approved never do); `tests/evals` in pytest testpaths = CI release gate. | ✅ **Working** (7/7) |
 | Observability            | tool_call_audit table written at the dispatch_tool chokepoint (both MCP-stdio and REST tagged by source; SHA-256 args hash; latency; never blocks dispatch); GET /api/v1/metrics (entity counts + per-tool calls/errors/avg latency); GET /api/v1/tool-audit. | ✅ **Working** (4 tests; 38/38 with regression scope) |
-| Approval-model upgrade   | ToolPolicy adopts call/session/forever scope vocabulary shared with Oh-Ben-Claw; plan-mode approval with argument bounds honored by ClawCamAdapter; approval audit trail. | 🔲 Planned    |
+| Approval-model upgrade   | ToolPolicy adopts call/session/forever scope vocabulary shared with Oh-Ben-Claw; plan-mode approval with argument bounds honored by ClawCamAdapter; approval audit trail. | ✅ **Done** (WS6 scopes + plan-mode/ArgumentBound, lockstep with OBC `ApprovedPlan`) |
 
 ## Phase 14: Hardware Integration (Planned — moved from Phase 13)
 | Deliverable              | Acceptance Criteria                                                                                          | Status        |

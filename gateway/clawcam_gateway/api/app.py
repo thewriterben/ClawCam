@@ -1048,26 +1048,12 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
 
     @app.get("/api/v1/tools")
     def list_tools() -> dict[str, Any]:
-        return {
-            "tools": [
-                {"name": "get_recent_detections", "approval_required": False},
-                {"name": "get_node_health", "approval_required": False},
-                {"name": "generate_daily_summary", "approval_required": False},
-                {"name": "list_pending_commands", "approval_required": False},
-                {"name": "list_capabilities", "approval_required": False},
-                {"name": "get_inference_results", "approval_required": False},
-                {"name": "list_species_detections", "approval_required": False},
-                {"name": "list_firmware_builds", "approval_required": False},
-                {"name": "get_cloud_sync_status", "approval_required": False},
-                {"name": "export_detections_csv", "approval_required": False},
-                {"name": "list_alert_rules", "approval_required": False},
-                {"name": "list_recent_alerts", "approval_required": False},
-                {"name": "capture_now", "approval_required": True},
-                {"name": "create_alert_rule", "approval_required": True},
-                {"name": "apply_config_patch", "approval_required": True},
-                {"name": "queue_firmware_update", "approval_required": True},
-            ]
-        }
+        # Single source of truth: derive the full catalog from the MCP tool
+        # definitions + approval set, so this endpoint can never drift from what
+        # the MCP server advertises and the brain actually sees.
+        from clawcam_gateway.mcp_server.stdio_server import tool_catalog
+
+        return {"tools": tool_catalog()}
 
     @app.post("/api/v1/tools/{tool_name}")
     def call_tool(tool_name: str, request: ToolRequest) -> dict[str, Any]:

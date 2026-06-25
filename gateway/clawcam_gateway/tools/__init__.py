@@ -23,6 +23,7 @@ from clawcam_gateway.tools.clawcam_tools import (
     list_detectors,
     list_detection_zones,
     list_firmware_builds,
+    list_observations_for_review,
     list_pending_commands,
     list_profiles,
     list_recent_alerts,
@@ -34,6 +35,7 @@ from clawcam_gateway.tools.clawcam_tools import (
     set_deployment_state,
     set_device_detector_chain,
     set_device_state,
+    set_review_state,
 )
 
 __all__ = [
@@ -59,6 +61,7 @@ __all__ = [
     "list_detectors",
     "list_detection_zones",
     "list_firmware_builds",
+    "list_observations_for_review",
     "list_pending_commands",
     "list_profiles",
     "list_recent_alerts",
@@ -70,4 +73,5 @@ __all__ = [
     "set_deployment_state",
     "set_device_detector_chain",
     "set_device_state",
+    "set_review_state",
 ]

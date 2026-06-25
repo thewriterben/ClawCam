@@ -357,6 +357,68 @@ def list_species_detections(
     }
 
 
+def list_observations_for_review(
+    context: ToolContext,
+    review_state: str = "needs_review",
+    limit: int = 25,
+) -> dict[str, Any]:
+    """List AI classifications in a given human-review state (triage queue).
+
+    review_state is one of: unreviewed, verified, corrected, rejected,
+    needs_review. Useful for "show me everything still waiting on a human" or
+    auditing what a model flagged as low-confidence. Read-only.
+    """
+    from clawcam_gateway.storage.database import REVIEW_STATES
+
+    if review_state not in REVIEW_STATES:
+        return {
+            "ok": False,
+            "error": f"invalid review_state: {review_state!r}",
+            "valid": sorted(REVIEW_STATES),
+        }
+    safe_limit = max(1, min(int(limit), 100))
+    results = context.db.list_inference_results_by_review_state(review_state, limit=safe_limit)
+    return {
+        "ok": True,
+        "review_state": review_state,
+        "count": len(results),
+        "results": results,
+    }
+
+
+def set_review_state(
+    context: ToolContext,
+    result_id: int,
+    review_state: str,
+    reviewer: str | None = None,
+    note: str | None = None,
+    approval_id: str | None = None,
+) -> dict[str, Any]:
+    """Set the human-review state on an AI classification. Approval-gated.
+
+    Non-destructive: the original machine detection is preserved; only review
+    metadata (state, reviewer, note, reviewed_at) is updated. Human review must
+    never overwrite field evidence (DATA_MODEL.md).
+    """
+    from clawcam_gateway.storage.database import REVIEW_STATES
+
+    if review_state not in REVIEW_STATES:
+        return {
+            "ok": False,
+            "error": f"invalid review_state: {review_state!r}",
+            "valid": sorted(REVIEW_STATES),
+        }
+    try:
+        updated = context.db.set_review_state(
+            int(result_id), review_state, reviewer=reviewer, note=note
+        )
+    except (ValueError, TypeError) as exc:
+        return {"ok": False, "error": str(exc)}
+    if updated is None:
+        return {"ok": False, "error": f"no classification with result_id {result_id}"}
+    return {"ok": True, "updated": True, "result": updated}
+
+
 def get_cloud_sync_status(
     context: ToolContext,
     limit: int = 25,

@@ -37,7 +37,13 @@ class SimulatedNode:
             "created_at": now,
             "last_seen_at": now,
             "deployment_id": self.deployment_id,
-            "capabilities": ["capture", "motion", "battery", "storage", "environment"],
+            "capabilities": [
+                "cap_clawcam_camera_trap",
+                "cap_clawcam_sensors",
+                "cap_clawcam_power",
+                "cap_clawcam_storage",
+                "cap_clawcam_events",
+            ],
             "hardware": {
                 "board": "esp32-s3-camera",
                 "mcu": "esp32-s3",

@@ -9,6 +9,7 @@ venv/
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
 media/
 !samples/firmware-bundle/media/
 uploads/
@@ -39,3 +40,6 @@ secrets.h
 .claude/
 pytest-cache-files-*/
 .pytest_cache/
+
+# Python build artifacts
+*.egg-info/

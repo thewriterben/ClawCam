@@ -8,6 +8,14 @@ import json
 import sqlite3
 from typing import Any, Iterator
 
+# Classification review states (DATA_MODEL.md + schemas/clawcam-observation.schema.json).
+# Human review updates review *metadata* on the original machine output rather
+# than deleting it — the raw detection is field evidence and must be preserved.
+REVIEW_STATE_UNREVIEWED = "unreviewed"
+REVIEW_STATES: frozenset[str] = frozenset(
+    {"unreviewed", "verified", "corrected", "rejected", "needs_review"}
+)
+
 
 class GatewayDatabase:
     """Durable local database for offline-first ClawCam field gateways."""
@@ -355,6 +363,18 @@ class GatewayDatabase:
             self._add_column_if_missing(conn, "alert_rules", "required_state", "TEXT")
             # Phase 12: per-device detector chain override
             self._add_column_if_missing(conn, "devices", "detector_chain_json", "TEXT")
+            # S1 (Remember): first-class human-review state on AI classifications.
+            self._add_column_if_missing(
+                conn, "inference_results", "review_state",
+                "TEXT NOT NULL DEFAULT 'unreviewed'",
+            )
+            self._add_column_if_missing(conn, "inference_results", "reviewed_at", "TEXT")
+            self._add_column_if_missing(conn, "inference_results", "reviewer", "TEXT")
+            self._add_column_if_missing(conn, "inference_results", "review_note", "TEXT")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_inference_review_state "
+                "ON inference_results(review_state)"
+            )
 
     @staticmethod
     def _add_column_if_missing(conn, table: str, column: str, column_def: str) -> None:
@@ -569,13 +589,17 @@ class GatewayDatabase:
     def save_inference_result(self, event_id: str, media_path: str, result: Any) -> None:
         """Persist an InferenceResult (duck-typed) for an event."""
         d = result.to_dict()
+        review_state = d.get("review_state", REVIEW_STATE_UNREVIEWED)
+        if review_state not in REVIEW_STATES:
+            raise ValueError(f"invalid review_state: {review_state!r}")
         with self.connect() as conn:
             conn.execute(
                 """
                 INSERT INTO inference_results
                     (event_id, media_path, model_name, model_version,
-                     detections_json, top_label, top_confidence, top_species)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     detections_json, top_label, top_confidence, top_species,
+                     review_state)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event_id,
@@ -586,26 +610,16 @@ class GatewayDatabase:
                     d.get("top_label"),
                     d.get("top_confidence"),
                     d.get("top_species"),
+                    review_state,
                 ),
             )
 
-    def get_inference_result(self, event_id: str) -> dict[str, Any] | None:
-        """Return the most recent inference result for an event, or None."""
-        with self.connect() as conn:
-            row = conn.execute(
-                """
-                SELECT event_id, media_path, model_name, model_version,
-                       detections_json, top_label, top_confidence, top_species, ran_at
-                FROM inference_results
-                WHERE event_id = ?
-                ORDER BY ran_at DESC
-                LIMIT 1
-                """,
-                (event_id,),
-            ).fetchone()
-        if row is None:
-            return None
+    @staticmethod
+    def _inference_dict(row: sqlite3.Row) -> dict[str, Any]:
+        """Build the public inference-result dict, including review metadata."""
+        keys = row.keys()
         return {
+            "result_id": row["result_id"] if "result_id" in keys else None,
             "event_id": row["event_id"],
             "media_path": row["media_path"],
             "model_name": row["model_name"],
@@ -615,7 +629,30 @@ class GatewayDatabase:
             "top_confidence": row["top_confidence"],
             "top_species": row["top_species"],
             "ran_at": row["ran_at"],
+            "review_state": row["review_state"] if "review_state" in keys else REVIEW_STATE_UNREVIEWED,
+            "reviewed_at": row["reviewed_at"] if "reviewed_at" in keys else None,
+            "reviewer": row["reviewer"] if "reviewer" in keys else None,
+            "review_note": row["review_note"] if "review_note" in keys else None,
         }
+
+    def get_inference_result(self, event_id: str) -> dict[str, Any] | None:
+        """Return the most recent inference result for an event, or None."""
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT result_id, event_id, media_path, model_name, model_version,
+                       detections_json, top_label, top_confidence, top_species, ran_at,
+                       review_state, reviewed_at, reviewer, review_note
+                FROM inference_results
+                WHERE event_id = ?
+                ORDER BY ran_at DESC
+                LIMIT 1
+                """,
+                (event_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._inference_dict(row)
 
     def list_inference_results_for_event(self, event_id: str) -> list[dict[str, Any]]:
         """Return *every* inference_results row for an event (Phase 12 chain).
@@ -625,27 +662,15 @@ class GatewayDatabase:
         with self.connect() as conn:
             rows = conn.execute(
                 """
-                SELECT event_id, media_path, model_name, model_version,
-                       detections_json, top_label, top_confidence, top_species, ran_at
+                SELECT result_id, event_id, media_path, model_name, model_version,
+                       detections_json, top_label, top_confidence, top_species, ran_at,
+                       review_state, reviewed_at, reviewer, review_note
                 FROM inference_results WHERE event_id = ?
                 ORDER BY ran_at ASC, result_id ASC
                 """,
                 (event_id,),
             ).fetchall()
-        out: list[dict[str, Any]] = []
-        for row in rows:
-            out.append({
-                "event_id": row["event_id"],
-                "media_path": row["media_path"],
-                "model_name": row["model_name"],
-                "model_version": row["model_version"],
-                "detections": json.loads(row["detections_json"]),
-                "top_label": row["top_label"],
-                "top_confidence": row["top_confidence"],
-                "top_species": row["top_species"],
-                "ran_at": row["ran_at"],
-            })
-        return out
+        return [self._inference_dict(row) for row in rows]
 
     def list_inference_results(
         self,
@@ -668,8 +693,9 @@ class GatewayDatabase:
         with self.connect() as conn:
             rows = conn.execute(
                 f"""
-                SELECT event_id, media_path, model_name, model_version,
-                       detections_json, top_label, top_confidence, top_species, ran_at
+                SELECT result_id, event_id, media_path, model_name, model_version,
+                       detections_json, top_label, top_confidence, top_species, ran_at,
+                       review_state, reviewed_at, reviewer, review_note
                 FROM inference_results
                 WHERE {where}
                 ORDER BY ran_at DESC
@@ -677,20 +703,73 @@ class GatewayDatabase:
                 """,
                 params,
             ).fetchall()
-        return [
-            {
-                "event_id": row["event_id"],
-                "media_path": row["media_path"],
-                "model_name": row["model_name"],
-                "model_version": row["model_version"],
-                "detections": json.loads(row["detections_json"]),
-                "top_label": row["top_label"],
-                "top_confidence": row["top_confidence"],
-                "top_species": row["top_species"],
-                "ran_at": row["ran_at"],
-            }
-            for row in rows
-        ]
+        return [self._inference_dict(row) for row in rows]
+
+    def set_review_state(
+        self,
+        result_id: int,
+        review_state: str,
+        reviewer: str | None = None,
+        note: str | None = None,
+        reviewed_at: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Update human-review metadata on a classification (non-destructive).
+
+        The original machine detections are never modified — only the review
+        state, reviewer, note, and timestamp. Returns the updated row, or None
+        if ``result_id`` does not exist.
+        """
+        if review_state not in REVIEW_STATES:
+            raise ValueError(
+                f"invalid review_state: {review_state!r}; "
+                f"expected one of {sorted(REVIEW_STATES)}"
+            )
+        if reviewed_at is None:
+            from datetime import datetime, timezone
+
+            reviewed_at = datetime.now(timezone.utc).isoformat()
+        with self.connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE inference_results
+                   SET review_state = ?, reviewer = ?, review_note = ?, reviewed_at = ?
+                 WHERE result_id = ?
+                """,
+                (review_state, reviewer, note, reviewed_at, result_id),
+            )
+            if cur.rowcount == 0:
+                return None
+            row = conn.execute(
+                """
+                SELECT result_id, event_id, media_path, model_name, model_version,
+                       detections_json, top_label, top_confidence, top_species, ran_at,
+                       review_state, reviewed_at, reviewer, review_note
+                FROM inference_results WHERE result_id = ?
+                """,
+                (result_id,),
+            ).fetchone()
+        return self._inference_dict(row) if row else None
+
+    def list_inference_results_by_review_state(
+        self, review_state: str, limit: int = 25
+    ) -> list[dict[str, Any]]:
+        """List classifications in a given review state (e.g. triage queue)."""
+        if review_state not in REVIEW_STATES:
+            raise ValueError(f"invalid review_state: {review_state!r}")
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT result_id, event_id, media_path, model_name, model_version,
+                       detections_json, top_label, top_confidence, top_species, ran_at,
+                       review_state, reviewed_at, reviewer, review_note
+                FROM inference_results
+                WHERE review_state = ?
+                ORDER BY ran_at DESC
+                LIMIT ?
+                """,
+                (review_state, limit),
+            ).fetchall()
+        return [self._inference_dict(row) for row in rows]
 
     def add_firmware_build(
         self, build_id: str, version: str, filename: str, sha256: str, size_bytes: int

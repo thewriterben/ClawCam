@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,12 @@ SCOPE_CALL = "call"
 SCOPE_SESSION = "session"
 SCOPE_FOREVER = "forever"
 APPROVAL_SCOPES = (SCOPE_CALL, SCOPE_SESSION, SCOPE_FOREVER)
+
+
+def _utc_now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
 
 
 class ApprovalGrants:
@@ -137,6 +144,7 @@ class ToolPolicy:
         "list_detectors",
         "get_device_detector_chain",
         "get_event_inference_chain",
+        "list_observations_for_review",
     }))
     always_ask: frozenset[str] = field(default_factory=lambda: frozenset({
         "capture_now",
@@ -148,6 +156,7 @@ class ToolPolicy:
         "create_schedule",
         "create_detection_zone",
         "set_device_detector_chain",
+        "set_review_state",
     }))
 
     def requires_approval(self, tool_name: str) -> bool:
@@ -167,6 +176,165 @@ class ApprovalRequired(Exception):
             f"Tool '{tool_name}' requires human approval before calling. "
             f"Pass approved=True after obtaining explicit user confirmation."
         )
+
+
+# ── Plan-mode approval (Phase 13 WS6 — lockstep with Oh-Ben-Claw ApprovedPlan) ─
+#
+# Wire-compatible with Oh-Ben-Claw's src/approval/mod.rs: a plan is approved
+# once (tools + per-argument bounds shown to the operator), then execution is
+# checked step by step. Argument-bound JSON uses the same tagged shape OBC's
+# serde emits (``{"kind": "exact"|"one_of"|"range"|"any", ...}``) so a plan
+# authored on the brain side validates identically here. **Halt on drift:** the
+# first violation revokes the whole plan; subsequent calls fail UNKNOWN_PLAN.
+
+BOUND_EXACT = "exact"
+BOUND_ONE_OF = "one_of"
+BOUND_RANGE = "range"
+BOUND_ANY = "any"
+_BOUND_KINDS = (BOUND_EXACT, BOUND_ONE_OF, BOUND_RANGE, BOUND_ANY)
+
+# PlanViolation kinds (mirror OBC's PlanViolation enum, snake_case tags).
+VIOLATION_WRONG_TOOL = "wrong_tool"
+VIOLATION_ARG_OUT_OF_BOUNDS = "arg_out_of_bounds"
+VIOLATION_UNLISTED_ARG = "unlisted_arg"
+VIOLATION_PLAN_EXHAUSTED = "plan_exhausted"
+VIOLATION_UNKNOWN_PLAN = "unknown_plan"
+
+
+@dataclass(frozen=True)
+class ArgumentBound:
+    """A constraint on one argument of a planned tool call.
+
+    Mirrors Oh-Ben-Claw's ``ArgumentBound``. Construct via the classmethods;
+    parse cross-repo plan JSON via :meth:`from_dict`.
+    """
+
+    kind: str
+    value: Any = None
+    values: tuple[Any, ...] | None = None
+    min: float | None = None
+    max: float | None = None
+
+    @classmethod
+    def exact(cls, value: Any) -> "ArgumentBound":
+        return cls(kind=BOUND_EXACT, value=value)
+
+    @classmethod
+    def one_of(cls, values: list[Any]) -> "ArgumentBound":
+        return cls(kind=BOUND_ONE_OF, values=tuple(values))
+
+    @classmethod
+    def range(cls, lo: float, hi: float) -> "ArgumentBound":
+        return cls(kind=BOUND_RANGE, min=float(lo), max=float(hi))
+
+    @classmethod
+    def any(cls) -> "ArgumentBound":
+        return cls(kind=BOUND_ANY)
+
+    def allows(self, value: Any) -> bool:
+        if self.kind == BOUND_EXACT:
+            return value == self.value
+        if self.kind == BOUND_ONE_OF:
+            return value in (self.values or ())
+        if self.kind == BOUND_RANGE:
+            # Booleans are not numbers for bound purposes (mirror OBC as_f64).
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return False
+            return self.min <= float(value) <= self.max
+        if self.kind == BOUND_ANY:
+            return True
+        return False
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "ArgumentBound":
+        kind = d.get("kind")
+        if kind not in _BOUND_KINDS:
+            raise ValueError(f"unknown argument-bound kind: {kind!r}")
+        if kind == BOUND_EXACT:
+            return cls.exact(d["value"])
+        if kind == BOUND_ONE_OF:
+            return cls.one_of(list(d["values"]))
+        if kind == BOUND_RANGE:
+            return cls.range(d["min"], d["max"])
+        return cls.any()
+
+
+class PlanViolationError(Exception):
+    """Raised when a tool call violates the active approved plan.
+
+    ``kind`` is one of the ``VIOLATION_*`` constants; ``detail`` carries the
+    offending key / expected tool where relevant.
+    """
+
+    def __init__(self, kind: str, **detail: Any):
+        self.kind = kind
+        self.detail = detail
+        super().__init__(f"plan violation: {kind} {detail or ''}".strip())
+
+
+@dataclass
+class PlanStep:
+    """One step of an approved plan."""
+
+    tool_name: str
+    bounds: dict[str, ArgumentBound] = field(default_factory=dict)
+    deny_unlisted_args: bool = False
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "PlanStep":
+        bounds = {
+            key: ArgumentBound.from_dict(b)
+            for key, b in (d.get("bounds") or {}).items()
+        }
+        return cls(
+            tool_name=d["tool_name"],
+            bounds=bounds,
+            deny_unlisted_args=bool(d.get("deny_unlisted_args", False)),
+        )
+
+
+@dataclass
+class ApprovedPlan:
+    """A multi-step plan approved once; execution is checked step by step."""
+
+    plan_id: str
+    steps: list[PlanStep]
+    created_at: str
+    cursor: int = 0
+
+    def check_next(self, tool_name: str, arguments: dict[str, Any]) -> None:
+        """Check the next call; advance the cursor on success, else raise."""
+        if self.cursor >= len(self.steps):
+            raise PlanViolationError(VIOLATION_PLAN_EXHAUSTED)
+        step = self.steps[self.cursor]
+
+        if step.tool_name != tool_name:
+            raise PlanViolationError(
+                VIOLATION_WRONG_TOOL, expected=step.tool_name, got=tool_name
+            )
+
+        args = arguments or {}
+        if step.deny_unlisted_args:
+            for key in args:
+                if key not in step.bounds:
+                    raise PlanViolationError(VIOLATION_UNLISTED_ARG, key=key)
+        for key, bound in step.bounds.items():
+            # A bounded key that is absent counts as out of bounds unless Any.
+            if key in args:
+                if not bound.allows(args[key]):
+                    raise PlanViolationError(VIOLATION_ARG_OUT_OF_BOUNDS, key=key)
+            elif bound.kind != BOUND_ANY:
+                raise PlanViolationError(VIOLATION_ARG_OUT_OF_BOUNDS, key=key)
+
+        self.cursor += 1
+
+    def is_complete(self) -> bool:
+        return self.cursor >= len(self.steps)
+
+
+def _coerce_steps(steps: list[Any]) -> list[PlanStep]:
+    """Accept PlanStep objects or cross-repo plan dicts interchangeably."""
+    return [s if isinstance(s, PlanStep) else PlanStep.from_dict(s) for s in steps]
 
 
 # ── MCP stdio client ───────────────────────────────────────────────────────
@@ -280,6 +448,7 @@ class ClawCamAdapter:
         self._grants = grants or ApprovalGrants()
         self._approval_audit: list[dict[str, Any]] = []
         self._funnel: dict[str, dict[str, int]] = {}
+        self._plans: dict[str, ApprovedPlan] = {}
         self._client: _MCPStdioClient | None = None
         self._tools: list[dict[str, Any]] = []
 
@@ -355,15 +524,23 @@ class ClawCamAdapter:
         arguments: dict[str, Any] | None = None,
         approved: bool = False,
         scope: str = SCOPE_CALL,
+        plan_id: str | None = None,
     ) -> dict[str, Any]:
         """Dispatch a ClawCam tool call through the MCP bridge.
 
         Approval model (Phase 13 WS6 — shared vocabulary with Oh-Ben-Claw):
-        a gated tool runs when ``approved=True`` is passed for this call, or
-        when a prior ``session``/``forever`` grant covers the tool. Passing
-        ``approved=True`` with ``scope="session"`` or ``"forever"`` records a
-        durable grant. Every gated decision is appended to the approval audit
-        and counted in the funnel.
+        a gated tool runs when
+
+          * ``plan_id`` is given and the call matches the next step of that
+            approved plan (the plan *was* the approval — no per-call flag);
+          * ``approved=True`` is passed for this call; or
+          * a prior ``session``/``forever`` grant covers the tool.
+
+        Passing ``approved=True`` with ``scope="session"``/``"forever"`` records
+        a durable grant. Plan checks take precedence when ``plan_id`` is set: a
+        matching call advances the plan cursor, and **any** violation revokes
+        the whole plan (halt on drift). Every gated decision is appended to the
+        approval audit and counted in the funnel.
 
         Args:
             name: Tool name from the ClawCam tool catalog.
@@ -371,12 +548,16 @@ class ClawCamAdapter:
             approved: Explicit human approval for this call.
             scope: Grant scope when approved: "call" (default), "session",
                    or "forever".
+            plan_id: Id of an approved plan (see :meth:`approve_plan`) that
+                pre-authorizes this call.
 
         Returns:
             The tool result dict with an 'ok' flag.
 
         Raises:
             ApprovalRequired: When an approval-gated tool lacks approval/grant.
+            PlanViolationError: When ``plan_id`` is set but the call does not
+                match the plan (the plan is revoked).
             ValueError: On an unknown scope.
             RuntimeError: When the adapter is not connected.
         """
@@ -389,7 +570,11 @@ class ClawCamAdapter:
         args = arguments or {}
 
         if self._policy.requires_approval(name):
-            if approved:
+            if plan_id is not None:
+                # Raises PlanViolationError (and revokes the plan) on drift.
+                self.check_plan_call(plan_id, name, args)
+                self._record_approval(name, decision="approved_plan")
+            elif approved:
                 self._grants.grant(name, scope)
                 self._record_approval(name, decision=f"approved_{scope}")
             elif self._grants.is_granted(name):
@@ -400,24 +585,82 @@ class ClawCamAdapter:
 
         return self._client.call_tool(name, args)
 
+    # ── Plan mode (lockstep with Oh-Ben-Claw ApprovalManager) ───────────────
+
+    def approve_plan(self, steps: list[Any]) -> str:
+        """Register an approved multi-step plan; return its id.
+
+        ``steps`` may be :class:`PlanStep` objects or cross-repo plan dicts
+        (``{"tool_name", "bounds", "deny_unlisted_args"}``). The plan should be
+        shown to the operator (tools + bounds) before this is called.
+        """
+        plan = ApprovedPlan(
+            plan_id=str(uuid.uuid4()),
+            steps=_coerce_steps(steps),
+            created_at=_utc_now_iso(),
+        )
+        self._plans[plan.plan_id] = plan
+        return plan.plan_id
+
+    def check_plan_call(
+        self, plan_id: str, tool_name: str, arguments: dict[str, Any]
+    ) -> None:
+        """Check a call against an approved plan.
+
+        On success the plan cursor advances (and the plan is dropped once every
+        step is consumed). **On any violation the plan is revoked** — later
+        calls raise ``unknown_plan`` and must obtain fresh approval.
+        """
+        plan = self._plans.get(plan_id)
+        if plan is None:
+            raise PlanViolationError(VIOLATION_UNKNOWN_PLAN, plan_id=plan_id)
+        try:
+            plan.check_next(tool_name, arguments)
+        except PlanViolationError as violation:
+            self._plans.pop(plan_id, None)  # halt on drift
+            self._record_plan_violation(tool_name, plan_id, violation)
+            raise
+        if plan.is_complete():
+            self._plans.pop(plan_id, None)
+
+    def active_plan_count(self) -> int:
+        """Number of currently active (not yet completed/revoked) plans."""
+        return len(self._plans)
+
     # ── Approval audit & funnel ────────────────────────────────────────────
 
-    def _record_approval(self, tool_name: str, decision: str) -> None:
-        from datetime import datetime, timezone
+    def _counters_for(self, tool_name: str) -> dict[str, int]:
+        return self._funnel.setdefault(
+            tool_name,
+            {"asked": 0, "approved_call": 0, "approved_session": 0,
+             "approved_forever": 0, "approved_plan": 0, "granted_prior": 0,
+             "denied": 0, "plan_violation": 0},
+        )
 
+    def _record_approval(self, tool_name: str, decision: str) -> None:
         self._approval_audit.append({
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": _utc_now_iso(),
             "tool_name": tool_name,
             "decision": decision,
         })
-        counters = self._funnel.setdefault(
-            tool_name,
-            {"asked": 0, "approved_call": 0, "approved_session": 0,
-             "approved_forever": 0, "granted_prior": 0, "denied": 0},
-        )
+        counters = self._counters_for(tool_name)
         counters["asked"] += 1
         if decision in counters:
             counters[decision] += 1
+
+    def _record_plan_violation(
+        self, tool_name: str, plan_id: str, violation: "PlanViolationError"
+    ) -> None:
+        # A violation is not an "ask" — it only bumps the violation counter
+        # (mirrors Oh-Ben-Claw's ApprovalFunnel.record_plan_violation).
+        self._approval_audit.append({
+            "timestamp": _utc_now_iso(),
+            "tool_name": tool_name,
+            "decision": "plan_violation",
+            "plan_id": plan_id,
+            "violation": violation.kind,
+        })
+        self._counters_for(tool_name)["plan_violation"] += 1
 
     def approval_audit(self) -> list[dict[str, Any]]:
         """Audit entries for gated-tool decisions this adapter lifetime."""

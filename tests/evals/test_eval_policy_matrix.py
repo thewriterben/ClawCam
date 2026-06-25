@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from clawcam_gateway.ingest.cli import import_directory
-from clawcam_gateway.mcp_server.stdio_server import TOOL_DEFINITIONS
+from clawcam_gateway.mcp_server.stdio_server import APPROVAL_REQUIRED_TOOLS, TOOL_DEFINITIONS
 from clawcam_gateway.simulator.node_simulator import SimulatedNode
 from clawcam_gateway.storage.database import GatewayDatabase
 
@@ -58,9 +58,10 @@ def test_eval_policy_partition_is_total_and_exact() -> None:
     stale = (policy.auto_approve | policy.always_ask) - catalogue
     assert not stale, f"policy entries for non-existent tools: {sorted(stale)}"
 
-    # Golden partition sizes (update deliberately when adding tools).
-    assert len(policy.auto_approve) == 23
-    assert len(policy.always_ask) == 9
+    # The gated bucket IS the approval SSOT, and auto-approve is the remainder.
+    # Derived (not magic numbers) so adding a tool can't silently drift the gate.
+    assert policy.always_ask == set(APPROVAL_REQUIRED_TOOLS)
+    assert policy.auto_approve == catalogue - set(APPROVAL_REQUIRED_TOOLS)
 
 
 def test_eval_every_gated_tool_asks(tmp_path) -> None:

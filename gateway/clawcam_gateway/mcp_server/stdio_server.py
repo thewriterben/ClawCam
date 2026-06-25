@@ -32,6 +32,43 @@ SERVER_VERSION = "0.1.0"
 TOOLS_LIST_TTL_MS = 60_000
 
 
+# Single source of truth for which tools change the world and therefore require
+# operator approval. The brain adapter's ``ToolPolicy.always_ask`` MUST equal
+# this set (enforced by tests/gateway/test_tool_catalog_ssot.py). Every other
+# tool is read-only and auto-approved.
+APPROVAL_REQUIRED_TOOLS: frozenset[str] = frozenset(
+    {
+        "capture_now",
+        "apply_config_patch",
+        "queue_firmware_update",
+        "create_alert_rule",
+        "set_device_state",
+        "set_deployment_state",
+        "create_schedule",
+        "create_detection_zone",
+        "set_device_detector_chain",
+        "set_review_state",
+    }
+)
+
+
+def tool_catalog() -> list[dict[str, Any]]:
+    """Public tool catalog — ``name`` + ``description`` + ``approval_required``
+    for every tool, derived from ``TOOL_DEFINITIONS`` + ``APPROVAL_REQUIRED_TOOLS``.
+
+    This is the single source the HTTP ``GET /api/v1/tools`` endpoint serves, so
+    the catalog can never drift from what the MCP server actually advertises.
+    """
+    return [
+        {
+            "name": t["name"],
+            "description": t.get("description", ""),
+            "approval_required": t["name"] in APPROVAL_REQUIRED_TOOLS,
+        }
+        for t in TOOL_DEFINITIONS
+    ]
+
+
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "name": "get_recent_detections",
@@ -401,6 +438,39 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "properties": {
                 "device_id": {"type": "string"},
                 "build_id": {"type": "string", "description": "Build ID from list_firmware_builds."},
+                "approval_id": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "list_observations_for_review",
+        "description": "List AI classifications in a given human-review state (triage queue): unreviewed, verified, corrected, rejected, needs_review. Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "review_state": {
+                    "type": "string",
+                    "enum": ["unreviewed", "verified", "corrected", "rejected", "needs_review"],
+                    "default": "needs_review",
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25},
+            },
+        },
+    },
+    {
+        "name": "set_review_state",
+        "description": "Set the human-review state on an AI classification by result_id. Approval-gated and non-destructive: the original machine detection is preserved; only review metadata (state, reviewer, note, timestamp) changes.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["result_id", "review_state"],
+            "properties": {
+                "result_id": {"type": "integer", "description": "inference_results.result_id to review."},
+                "review_state": {
+                    "type": "string",
+                    "enum": ["unreviewed", "verified", "corrected", "rejected", "needs_review"],
+                },
+                "reviewer": {"type": "string", "description": "Who performed the review."},
+                "note": {"type": "string", "description": "Optional reviewer note."},
                 "approval_id": {"type": "string"},
             },
         },

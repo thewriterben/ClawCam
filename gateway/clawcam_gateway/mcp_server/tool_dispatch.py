@@ -32,6 +32,7 @@ from clawcam_gateway.tools import (
     list_detectors,
     list_detection_zones,
     list_firmware_builds,
+    list_observations_for_review,
     list_pending_commands,
     list_profiles,
     list_recent_alerts,
@@ -43,6 +44,7 @@ from clawcam_gateway.tools import (
     set_deployment_state,
     set_device_detector_chain,
     set_device_state,
+    set_review_state,
 )
 
 
@@ -100,6 +102,8 @@ def dispatch_tool(
         "list_capabilities": lambda **kw: list_capabilities(context, **kw),
         "get_inference_results": lambda **kw: get_inference_results(context, **kw),
         "list_species_detections": lambda **kw: list_species_detections(context, **kw),
+        "list_observations_for_review": lambda **kw: list_observations_for_review(context, **kw),
+        "set_review_state": lambda **kw: set_review_state(context, **kw),
         "list_firmware_builds": lambda **kw: list_firmware_builds(context, **kw),
         "get_cloud_sync_status": lambda **kw: get_cloud_sync_status(context, **kw),
         "export_detections_csv": lambda **kw: export_detections_csv(context, **kw),
