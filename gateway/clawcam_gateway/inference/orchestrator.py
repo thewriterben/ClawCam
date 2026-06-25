@@ -37,10 +37,10 @@ logger = logging.getLogger(__name__)
 class InferenceOrchestrator:
     """Picks the detector chain for a device and runs every available one."""
 
-    def __init__(self, db: "GatewayDatabase", enabled: bool = True):
+    def __init__(self, db: "GatewayDatabase", enabled: bool = True, registry=None):
         self._db = db
         self._enabled = enabled
-        self._registry = get_registry()
+        self._registry = registry if registry is not None else get_registry()
 
     # ── Chain resolution ──────────────────────────────────────────────────
 

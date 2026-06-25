@@ -188,11 +188,15 @@ class TestOrchestratorRun:
         self._seed_event(tmp_db)
         img = tmp_path / "x.jpg"
         img.write_bytes(b"FAKEJPEG")
-        # Force-override to a chain with three known-available mock-backed names
-        tmp_db.set_device_detector_chain(
-            "cam-p12", ["mock_detector", "bird_classifier", "face_recognizer"]
-        )
-        orch = InferenceOrchestrator(db=tmp_db)
+        # Inject a registry of three always-available detectors so the test
+        # exercises "run every available detector" without depending on which
+        # production detectors happen to be mock-backed vs. real-but-unavailable.
+        reg = DetectorRegistry()
+        reg.register("det_a", lambda: MockDetector())
+        reg.register("det_b", lambda: MockDetector())
+        reg.register("det_c", lambda: MockDetector())
+        tmp_db.set_device_detector_chain("cam-p12", ["det_a", "det_b", "det_c"])
+        orch = InferenceOrchestrator(db=tmp_db, registry=reg)
         summaries = orch.run("evt-orch-1", str(img), device_id="cam-p12")
         assert len(summaries) == 3
         assert all(s["stored"] is True for s in summaries)
@@ -222,12 +226,14 @@ class TestOrchestratorRun:
         self._seed_event(tmp_db, event_id="evt-orch-order")
         img = tmp_path / "x.jpg"
         img.write_bytes(b"x")
-        tmp_db.set_device_detector_chain("cam-p12", ["mock_detector", "bird_classifier"])
-        orch = InferenceOrchestrator(db=tmp_db)
+        reg = DetectorRegistry()
+        reg.register("det_x", lambda: MockDetector())
+        reg.register("det_y", lambda: MockDetector())
+        tmp_db.set_device_detector_chain("cam-p12", ["det_x", "det_y"])
+        orch = InferenceOrchestrator(db=tmp_db, registry=reg)
         orch.run("evt-orch-order", str(img), device_id="cam-p12")
         rows = tmp_db.list_inference_results_for_event("evt-orch-order")
-        # Both rows are MockDetector (placeholders all the way down), but they
-        # exist and are ordered.
+        # Both detectors produced a row, in execution order.
         assert len(rows) == 2
 
 

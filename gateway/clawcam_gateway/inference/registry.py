@@ -87,11 +87,10 @@ def _default_registry() -> DetectorRegistry:
     registry.register("megadetector_v5", _megadetector)
 
     def _bird_classifier():
-        # Placeholder — bird-feeder profile asks for this; for now we
-        # alias to MockDetector with a label biased to "bird" so the
-        # orchestrator wires through cleanly. Real implementation slots
-        # in here without touching callers.
-        return MockDetector()
+        # Real species classifier; lazy-loads torch + weights. Reports
+        # unavailable (and is skipped) until a model is installed in models/.
+        from clawcam_gateway.inference.bird_classifier import BirdClassifierDetector
+        return BirdClassifierDetector()
     registry.register("bird_classifier", _bird_classifier)
 
     def _face_recognizer():
