@@ -57,3 +57,19 @@ that one-time fetch (or a pre-seeded `~/.EasyOCR` cache). For best accuracy a
 production setup should crop to the vehicle bounding box before OCR; the scaffold
 OCRs the whole frame and filters for plate-shaped tokens. Validate on-device in
 the Phase 14 field test.
+
+## Face recognition (`face_recognizer`)
+
+The `face_recognizer` detector (`gateway/clawcam_gateway/inference/face_recognizer.py`)
+refines a MegaDetector `person` hit by locating faces and tagging the detection's
+`species` field with a recognised name (or `unknown`), for the home-security
+profiles. It is **availability-gated** on the engine: until `face_recognition` is
+installed (`pip install "clawcam-gateway[faces]"`) the detector reports
+unavailable and the orchestrator skips it.
+
+Enroll identities by placing `known_faces/<name>.jpg` in this directory (filename
+stem = person name); with no enrollment, faces are detected but reported as
+`unknown`. **Privacy:** this is biometric processing — pair it with `privacy_mask`
+zones and confirm it is lawful for your deployment before enabling. Encodings are
+computed locally; no image leaves the device. Validate on-device in the Phase 14
+field test.

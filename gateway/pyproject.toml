@@ -24,6 +24,10 @@ vision = [
 ocr = [
   "easyocr>=1.7"
 ]
+# Optional face recognition (home security) — pip install "clawcam-gateway[faces]"
+faces = [
+  "face-recognition>=1.3"
+]
 
 [tool.pytest.ini_options]
 # tests/evals is the Phase 13 WS4 release gate: no release while evals regress.

@@ -94,7 +94,9 @@ def _default_registry() -> DetectorRegistry:
     registry.register("bird_classifier", _bird_classifier)
 
     def _face_recognizer():
-        return MockDetector()  # placeholder
+        # Real face detection/recognition; lazy-loads face_recognition (dlib).
+        from clawcam_gateway.inference.face_recognizer import FaceRecognizerDetector
+        return FaceRecognizerDetector()
     registry.register("face_recognizer", _face_recognizer)
 
     def _plate_ocr():
