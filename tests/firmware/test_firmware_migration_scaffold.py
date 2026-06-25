@@ -106,7 +106,7 @@ def test_storage_component_exposes_gated_sd_fatfs_persistence() -> None:
 def test_firmware_main_persists_smoke_test_capture_when_enabled() -> None:
     main_source = (ROOT / "firmware/clawcam_node_espidf/main/main.c").read_text(encoding="utf-8")
     defaults = (ROOT / "firmware/clawcam_node_espidf/sdkconfig.defaults.esp32s3_eye").read_text(encoding="utf-8")
-    assert "persist_smoke_test_capture" in main_source
+    assert "persist_capture" in main_source  # shared smoke-test + live capture persister
     assert "clawcam_storage_save_media" in main_source
     assert "clawcam_storage_save_metadata" in main_source
     assert "camera_smoke_test" in main_source

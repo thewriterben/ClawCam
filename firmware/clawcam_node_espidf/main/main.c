@@ -238,12 +238,12 @@ static void persist_capture(
 
         esp_err_t reg_err = clawcam_gateway_client_register_device(&gateway_config, device_json);
         if (reg_err != ESP_OK) {
-            ESP_LOGW(TAG, "HTTP device registration failed (%s); SD remains source of truth",
+            ESP_LOGW(TAG, "HTTP device registration failed (%s); SD event remains source of truth",
                      esp_err_to_name(reg_err));
         } else {
             esp_err_t up_err = clawcam_gateway_client_upload_event(&gateway_config, event_json);
             if (up_err != ESP_OK) {
-                ESP_LOGW(TAG, "HTTP event upload failed (%s); SD remains source of truth",
+                ESP_LOGW(TAG, "HTTP event upload failed (%s); SD event remains source of truth",
                          esp_err_to_name(up_err));
             } else {
                 clawcam_power_record_transmission();
@@ -272,7 +272,7 @@ static void run_camera_smoke_test(void)
         esp_err_t err = clawcam_camera_capture(&capture);
         if (err == ESP_OK) {
             ESP_LOGI(TAG,
-                     "smoke test passed (attempt %d): bytes=%u width=%lu height=%lu mime=%s",
+                     "camera smoke test passed (attempt %d): bytes=%u width=%lu height=%lu mime=%s",
                      attempt,
                      (unsigned)capture.length,
                      (unsigned long)capture.width,

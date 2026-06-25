@@ -11,7 +11,7 @@ Rules are stored in SQLite and evaluated after each inference result is saved.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 

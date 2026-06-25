@@ -23,6 +23,12 @@ import json
 import logging
 import threading
 from typing import Any
+from .topics import (
+    MQTT_ROOT,
+    commands_topic,
+    device_id_from_topic,
+    topic_type,
+)
 
 log = logging.getLogger(__name__)
 
@@ -33,15 +39,6 @@ except ImportError:
     _PAHO_AVAILABLE = False
     mqtt = None  # type: ignore[assignment]
 
-from .topics import (
-    MQTT_ROOT,
-    ack_topic,
-    commands_topic,
-    device_id_from_topic,
-    events_topic,
-    health_topic,
-    topic_type,
-)
 
 
 class MQTTBridge:

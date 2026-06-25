@@ -606,7 +606,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         if not is_valid_state(new_state):
             raise HTTPException(
                 status_code=400,
-                detail=f"invalid state; must be one of: normal, armed, disarmed, away, vacation, feeding, maintenance",
+                detail="invalid state; must be one of: normal, armed, disarmed, away, vacation, feeding, maintenance",
             )
         ok, prev = db.set_device_state(
             device_id, new_state,
