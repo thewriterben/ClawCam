@@ -23,3 +23,9 @@ pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true   # paho, ultralytics, boto3, etc. are optional/untyped
+warn_unused_ignores = false  # paho/pillow present in CI but not locally; keeps results stable
+no_implicit_optional = true

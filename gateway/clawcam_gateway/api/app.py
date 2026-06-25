@@ -628,7 +628,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         auth: AuthContext = Depends(require_write),
     ) -> dict[str, Any]:
         from clawcam_gateway.profiles import is_valid_state
-        new_state = payload.data.get("state")
+        new_state = str(payload.data.get("state") or "")
         if not is_valid_state(new_state):
             raise HTTPException(
                 status_code=400,
@@ -649,7 +649,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         auth: AuthContext = Depends(require_write),
     ) -> dict[str, Any]:
         from clawcam_gateway.profiles import is_valid_profile
-        new_profile = payload.data.get("profile")
+        new_profile = str(payload.data.get("profile") or "")
         if not is_valid_profile(new_profile):
             raise HTTPException(status_code=400, detail=f"invalid profile: {new_profile}")
         ok = db.set_device_profile(device_id, new_profile)
@@ -663,7 +663,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         auth: AuthContext = Depends(require_write),
     ) -> dict[str, Any]:
         from clawcam_gateway.profiles import is_valid_state
-        new_state = payload.data.get("state")
+        new_state = str(payload.data.get("state") or "")
         if not is_valid_state(new_state):
             raise HTTPException(status_code=400, detail="invalid state")
         ok, prev = db.set_deployment_state(
@@ -785,8 +785,8 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         The event must already exist (registered via POST /api/v1/events).
         Inference runs asynchronously so this endpoint returns immediately.
         """
-        if db.get_inference_result(event_id) is not None and \
-                db.get_inference_result(event_id).get("model_name") != "mock_detector":
+        _existing = db.get_inference_result(event_id)
+        if _existing is not None and _existing.get("model_name") != "mock_detector":
             # Already processed; accept the upload but skip re-inference
             return {"ok": True, "event_id": event_id, "inference": "already_processed"}
 

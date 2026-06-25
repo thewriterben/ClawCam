@@ -1,0 +1,28 @@
+# Pre-commit hooks for ClawCam. Install once with:
+#   pip install pre-commit && pre-commit install
+# Run against everything on demand with:
+#   pre-commit run --all-files
+#
+# Mirrors CI: ruff lint matches the Tests workflow, and the line-ending hook
+# keeps the tree LF-only (paired with .gitattributes) so CRLF churn can't return.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.13.0
+    hooks:
+      - id: ruff
+        name: ruff (lint)
+        args: ["--config", "gateway/pyproject.toml"]
+        files: ^(gateway/clawcam_gateway|brain/oh-ben-claw-adapter)/.*\.py$
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: mixed-line-ending
+        name: enforce LF line endings
+        args: ["--fix=lf"]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]

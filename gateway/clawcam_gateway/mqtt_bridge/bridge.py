@@ -77,7 +77,7 @@ class MQTTBridge:
         self._client_id = client_id
         self._username = username
         self._password = password
-        self._client = None
+        self._client: Any = None
         self._connected = threading.Event()
         self._running = False
 

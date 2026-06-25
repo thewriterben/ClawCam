@@ -217,6 +217,7 @@ class MegaDetectorV5(BaseDetector):
 
     def detect(self, image_path: Path) -> InferenceResult:
         self._load()
+        assert self._model is not None  # _load() sets the model or raises
         results = self._model.predict(
             str(image_path), conf=self._conf, verbose=False
         )
