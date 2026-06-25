@@ -98,7 +98,9 @@ def _default_registry() -> DetectorRegistry:
     registry.register("face_recognizer", _face_recognizer)
 
     def _plate_ocr():
-        return MockDetector()  # placeholder
+        # Real OCR detector; lazy-loads easyocr. Skipped until installed.
+        from clawcam_gateway.inference.plate_ocr import PlateOCRDetector
+        return PlateOCRDetector()
     registry.register("plate_ocr", _plate_ocr)
 
     # Audio classifiers also opt in here so the orchestrator can chain

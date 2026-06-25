@@ -20,6 +20,10 @@ vision = [
   "torch>=2.0",
   "pillow>=10.0"
 ]
+# Optional OCR runtime (license-plate reading) — pip install "clawcam-gateway[ocr]"
+ocr = [
+  "easyocr>=1.7"
+]
 
 [tool.pytest.ini_options]
 # tests/evals is the Phase 13 WS4 release gate: no release while evals regress.

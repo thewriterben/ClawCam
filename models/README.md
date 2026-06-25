@@ -42,3 +42,18 @@ Any model matching that contract works — a fine-tuned timm/torchvision head, o
 NABirds / iNaturalist-trained classifier. Record model name, version, and
 confidence per the model-registry rules above. Validate on-device as part of the
 Phase 14 field test (see `docs/PHASE14_FIELD_TEST_PLAN.md`).
+
+## License-plate OCR (`plate_ocr`)
+
+The `plate_ocr` detector (`gateway/clawcam_gateway/inference/plate_ocr.py`) refines a
+MegaDetector `vehicle` hit by reading the license plate into the detection's
+`species` field, for the driveway and outdoor-security profiles. It is
+**availability-gated** on the OCR engine: until `easyocr` is installed
+(`pip install "clawcam-gateway[ocr]"`) the detector reports unavailable and the
+orchestrator skips it.
+
+`easyocr` downloads its recognition models on first use, so a field gateway needs
+that one-time fetch (or a pre-seeded `~/.EasyOCR` cache). For best accuracy a
+production setup should crop to the vehicle bounding box before OCR; the scaffold
+OCRs the whole frame and filters for plate-shaped tokens. Validate on-device in
+the Phase 14 field test.
