@@ -461,6 +461,22 @@ class GatewayDatabase:
                 ),
             )
 
+    def deployment_for_device(self, device_id: str) -> str | None:
+        """Return the deployment_id column for a device, or None if absent."""
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT deployment_id FROM devices WHERE device_id = ?", (device_id,)
+            ).fetchone()
+        return row["deployment_id"] if row else None
+
+    def deployment_for_event(self, event_id: str) -> str | None:
+        """Return the deployment_id column for an event, or None if absent."""
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT deployment_id FROM events WHERE event_id = ?", (event_id,)
+            ).fetchone()
+        return row["deployment_id"] if row else None
+
     def get_event(self, event_id: str) -> dict[str, Any] | None:
         """Return a single event by event_id, or None."""
         with self.connect() as conn:

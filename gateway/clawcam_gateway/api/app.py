@@ -95,6 +95,26 @@ def _deployment_scope(auth: AuthContext) -> str | None:
     return None if auth.scope == SCOPE_ADMIN else auth.deployment_id
 
 
+def _check_device_access(db, auth: AuthContext, device_id: str) -> None:
+    """403 if a non-admin caller reads a device in another deployment (missing -> let 404 stand)."""
+    scope = _deployment_scope(auth)
+    if scope is None:
+        return
+    dep = db.deployment_for_device(device_id)
+    if dep is not None and dep != scope:
+        raise HTTPException(status_code=403, detail="forbidden: resource belongs to another deployment")
+
+
+def _check_event_access(db, auth: AuthContext, event_id: str) -> None:
+    """403 if a non-admin caller reads an event in another deployment (missing -> let 404 stand)."""
+    scope = _deployment_scope(auth)
+    if scope is None:
+        return
+    dep = db.deployment_for_event(event_id)
+    if dep is not None and dep != scope:
+        raise HTTPException(status_code=403, detail="forbidden: resource belongs to another deployment")
+
+
 def create_app(config: GatewayConfig | None = None) -> FastAPI:
     config = config or GatewayConfig.from_env()
     db = GatewayDatabase(config.database_path)
@@ -383,7 +403,8 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         }
 
     @app.get("/api/v1/devices/{device_id}/detector-chain")
-    def get_device_detector_chain(device_id: str) -> dict[str, Any]:
+    def get_device_detector_chain(device_id: str, auth: AuthContext = Depends(get_auth_context)) -> dict[str, Any]:
+        _check_device_access(db, auth, device_id)
         chain = inference_orchestrator.chain_for_device(device_id)
         device = db.get_device(device_id)
         if device is None:
@@ -410,7 +431,8 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         return {"ok": True, "device_id": device_id, "chain": chain}
 
     @app.get("/api/v1/events/{event_id}/inference/chain")
-    def get_event_inference_chain(event_id: str) -> dict[str, Any]:
+    def get_event_inference_chain(event_id: str, auth: AuthContext = Depends(get_auth_context)) -> dict[str, Any]:
+        _check_event_access(db, auth, event_id)
         results = db.list_inference_results_for_event(event_id)
         return {"ok": True, "event_id": event_id, "results": results, "count": len(results)}
 
@@ -460,7 +482,8 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         }
 
     @app.get("/api/v1/audio/{event_id}/classifications")
-    def get_event_audio_classifications(event_id: str) -> dict[str, Any]:
+    def get_event_audio_classifications(event_id: str, auth: AuthContext = Depends(get_auth_context)) -> dict[str, Any]:
+        _check_event_access(db, auth, event_id)
         classifications = db.list_audio_classifications(event_id=event_id)
         uploads = db.list_audio_uploads(event_id=event_id)
         return {
@@ -613,7 +636,8 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         return {"ok": True, "profile": get_profile_defaults(profile_name).to_dict()}
 
     @app.get("/api/v1/devices/{device_id}/state")
-    def get_device_state_endpoint(device_id: str) -> dict[str, Any]:
+    def get_device_state_endpoint(device_id: str, auth: AuthContext = Depends(get_auth_context)) -> dict[str, Any]:
+        _check_device_access(db, auth, device_id)
         row = db.get_device_profile_state(device_id)
         if row is None:
             raise HTTPException(status_code=404, detail=f"unknown device: {device_id}")
@@ -740,7 +764,8 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         return {"detections": db.recent_events(limit=limit, deployment_id=_deployment_scope(auth)), "limit": limit}
 
     @app.get("/api/v1/devices/{device_id}/health")
-    def device_health(device_id: str) -> dict[str, Any]:
+    def device_health(device_id: str, auth: AuthContext = Depends(get_auth_context)) -> dict[str, Any]:
+        _check_device_access(db, auth, device_id)
         health = db.latest_health(device_id)
         if health is None:
             raise HTTPException(status_code=404, detail="no health record found")
@@ -772,7 +797,8 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         return {"ok": True, "command_id": command_id, "status": ack.status}
 
     @app.get("/api/v1/devices/{device_id}/capabilities")
-    def device_capabilities(device_id: str) -> dict[str, Any]:
+    def device_capabilities(device_id: str, auth: AuthContext = Depends(get_auth_context)) -> dict[str, Any]:
+        _check_device_access(db, auth, device_id)
         """Return the capability groups declared by a node."""
         caps = db.get_device_capabilities(device_id)
         if db.get_device(device_id) is None:
@@ -846,7 +872,8 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         return {"ok": True, "event_id": event_id, "media_path": str(dest), "inference": "queued"}
 
     @app.get("/api/v1/events/{event_id}/inference")
-    def get_event_inference(event_id: str) -> dict[str, Any]:
+    def get_event_inference(event_id: str, auth: AuthContext = Depends(get_auth_context)) -> dict[str, Any]:
+        _check_event_access(db, auth, event_id)
         """Return the inference result for a specific event."""
         result = db.get_inference_result(event_id)
         if result is None:

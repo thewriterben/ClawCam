@@ -557,6 +557,22 @@ class TestAuthEnabled:
                            headers={"Authorization": f"Bearer {admin_tok}"}).json()
         assert {"dev-a", "dev-b"} <= {d["device_id"] for d in body2["devices"]}
 
+    def test_per_id_read_blocked_cross_deployment(self, client_auth):
+        client, db = client_auth
+        db.add_deployment({"deployment_id": "dep-a", "name": "A"})
+        def _dev(did, dep):
+            db.upsert_device({
+                "device_id": did, "device_type": "node", "name": did,
+                "status": "active", "created_at": "2026-05-12T00:00:00Z",
+                "deployment_id": dep, "capabilities": ["cap_clawcam_camera_trap"],
+            })
+        _dev("dev-def", "default")  # caller's own deployment
+        _dev("dev-a", "dep-a")      # another tenant
+        tok = self._add_user_key(db, scope="read", deployment_id="default")
+        hdr = {"Authorization": f"Bearer {tok}"}
+        assert client.get("/api/v1/devices/dev-a/capabilities", headers=hdr).status_code == 403
+        assert client.get("/api/v1/devices/dev-def/capabilities", headers=hdr).status_code == 200
+
 class TestTenantDataScoping:
     """DB-level tenant filtering for events, inference results, and alerts (H4 extension)."""
 

@@ -55,10 +55,15 @@ originating event), and `GET /inference/recent`, `GET /alerts`, `GET /export/eve
 `GET /export/detections.csv` now filter to the caller's deployment (admins see all). DB-level
 filter tests are in `tests/gateway/test_phase7_auth.py::TestTenantDataScoping`.
 
-**Remaining:** the per-event / per-device point reads (e.g. `GET /events/{id}/inference`,
-`GET /devices/{id}/health`) still return a record by id without a deployment check — lower risk
-(requires knowing the id), but worth a membership check for completeness. Also consider
-defaulting auth on when the gateway binds to a non-loopback interface.
+Per-id point reads are now guarded too: `GET /devices/{id}/{health,state,capabilities,
+detector-chain}` and `GET /events/{id}/inference`, `/inference/chain`, and `/audio/{id}/
+classifications` return `403` when a non-admin caller references a record in another deployment
+(a missing record still yields the normal `404`). Covered by
+`test_phase7_auth.py::TestAuthEnabled::test_per_id_read_blocked_cross_deployment`.
+
+**Remaining (optional hardening, not a known gap):** consider defaulting auth on when the
+gateway binds to a non-loopback interface; otherwise H4 is closed — every mutating endpoint
+requires `write`, and every tenant-data read (lists and per-id) is deployment-scoped.
 
 ### M2 — API-key hash
 Tokens are high-entropy (`secrets.token_urlsafe(32)`) and stored as bare SHA-256, looked up by
