@@ -557,6 +557,47 @@ class TestAuthEnabled:
                            headers={"Authorization": f"Bearer {admin_tok}"}).json()
         assert {"dev-a", "dev-b"} <= {d["device_id"] for d in body2["devices"]}
 
+class TestTenantDataScoping:
+    """DB-level tenant filtering for events, inference results, and alerts (H4 extension)."""
+
+    class _Result:
+        def to_dict(self):
+            return {"model_name": "m", "model_version": "1", "detections": [],
+                    "top_label": "animal", "top_confidence": 0.9, "top_species": "deer",
+                    "review_state": "unreviewed"}
+
+    def _seed_event(self, db, event_id, deployment_id):
+        db.add_event({
+            "event_id": event_id, "event_type": "capture", "device_id": "dev",
+            "timestamp": "2026-05-12T00:00:00Z", "source": "node",
+            "deployment_id": deployment_id, "media": [],
+        })
+
+    def test_recent_events_scoped(self, tmp_db: GatewayDatabase):
+        self._seed_event(tmp_db, "e-a", "dep-a")
+        self._seed_event(tmp_db, "e-b", "dep-b")
+        assert {e["event_id"] for e in tmp_db.recent_events(deployment_id="dep-a")} == {"e-a"}
+        assert {e["event_id"] for e in tmp_db.recent_events()} == {"e-a", "e-b"}
+
+    def test_inference_results_scoped(self, tmp_db: GatewayDatabase):
+        self._seed_event(tmp_db, "e-a", "dep-a")
+        self._seed_event(tmp_db, "e-b", "dep-b")
+        tmp_db.save_inference_result("e-a", "/m/a.jpg", self._Result())
+        tmp_db.save_inference_result("e-b", "/m/b.jpg", self._Result())
+        scoped = tmp_db.list_inference_results(deployment_id="dep-a")
+        assert {r["event_id"] for r in scoped} == {"e-a"}
+        assert {r["event_id"] for r in tmp_db.list_inference_results()} == {"e-a", "e-b"}
+
+    def test_alert_events_scoped(self, tmp_db: GatewayDatabase):
+        self._seed_event(tmp_db, "e-a", "dep-a")
+        tmp_db.add_alert_event({
+            "alert_event_id": "al-1", "rule_id": "r", "rule_name": "n",
+            "event_id": "e-a", "delivery_status": "delivered",
+            "fired_at": "2026-05-12T00:00:00Z",
+        })
+        assert len(tmp_db.list_alert_events(deployment_id="dep-a")) == 1
+        assert tmp_db.list_alert_events(deployment_id="dep-b") == []
+
 class TestBackwardCompatibility:
     def test_existing_devices_endpoint_works_without_auth(self, client_no_auth):
         """When auth is disabled, /api/v1/devices should be open as before."""

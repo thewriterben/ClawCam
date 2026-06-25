@@ -859,6 +859,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         label: str | None = None,
         min_confidence: float = 0.0,
         species: str | None = None,
+        auth: AuthContext = Depends(get_auth_context),
     ) -> dict[str, Any]:
         """List recent inference results with optional filters."""
         safe_limit = max(1, min(limit, 100))
@@ -867,6 +868,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             label=label,
             min_confidence=min_confidence,
             species=species,
+            deployment_id=_deployment_scope(auth),
         )
         return {"ok": True, "results": results, "count": len(results)}
 
@@ -949,6 +951,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         limit: int = 25,
         rule_id: str | None = None,
         delivery_status: str | None = None,
+        auth: AuthContext = Depends(get_auth_context),
     ) -> dict[str, Any]:
         """Return recent fired alert events."""
         safe_limit = max(1, min(limit, 200))
@@ -956,6 +959,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             limit=safe_limit,
             rule_id=rule_id,
             delivery_status=delivery_status,
+            deployment_id=_deployment_scope(auth),
         )
         return {"ok": True, "alerts": events, "count": len(events)}
 
@@ -965,10 +969,12 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     def export_events(
         limit: int = 1000,
         device_id: str | None = None,
+        auth: AuthContext = Depends(get_auth_context),
     ) -> StreamingResponse:
         """Download recent events as a CSV file."""
         safe_limit = max(1, min(limit, 10000))
-        csv_text = export_events_csv(db, limit=safe_limit, device_id=device_id)
+        csv_text = export_events_csv(db, limit=safe_limit, device_id=device_id,
+                                     deployment_id=_deployment_scope(auth))
         filename = csv_filename("events")
         return StreamingResponse(
             iter([csv_text]),
@@ -982,6 +988,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         label: str | None = None,
         min_confidence: float = 0.0,
         species: str | None = None,
+        auth: AuthContext = Depends(get_auth_context),
     ) -> StreamingResponse:
         """Download recent inference detections as a CSV file."""
         safe_limit = max(1, min(limit, 10000))
@@ -991,6 +998,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             label=label,
             min_confidence=min_confidence,
             species=species,
+            deployment_id=_deployment_scope(auth),
         )
         filename = csv_filename("detections")
         return StreamingResponse(

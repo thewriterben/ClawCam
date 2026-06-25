@@ -49,10 +49,16 @@ end-to-end for devices and events: `deployment_id` is now persisted on insert an
 admins (and the auth-disabled synthetic admin) still see all tenants. Covered by new tests in
 `tests/gateway/test_phase7_auth.py`.
 
-**Remaining:** apply the same `_deployment_scope(auth)` filter to the other tenant-data reads
-(`/inference/recent`, `/alerts`, `/export/*`, per-event/-device reads), wiring `deployment_id`
-into `list_inference_results` / `list_alert_events` at insert time as was done for devices and
-events. Also consider defaulting auth on when bound to a non-loopback interface.
+Tenant read-scoping has since been extended to the remaining list endpoints:
+`deployment_id` is persisted on inference-result and alert-event inserts (derived from the
+originating event), and `GET /inference/recent`, `GET /alerts`, `GET /export/events.csv`, and
+`GET /export/detections.csv` now filter to the caller's deployment (admins see all). DB-level
+filter tests are in `tests/gateway/test_phase7_auth.py::TestTenantDataScoping`.
+
+**Remaining:** the per-event / per-device point reads (e.g. `GET /events/{id}/inference`,
+`GET /devices/{id}/health`) still return a record by id without a deployment check — lower risk
+(requires knowing the id), but worth a membership check for completeness. Also consider
+defaulting auth on when the gateway binds to a non-loopback interface.
 
 ### M2 — API-key hash
 Tokens are high-entropy (`secrets.token_urlsafe(32)`) and stored as bare SHA-256, looked up by

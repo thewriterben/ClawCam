@@ -98,9 +98,10 @@ def export_events_csv(
     db: "GatewayDatabase",
     limit: int = 1000,
     device_id: str | None = None,
+    deployment_id: str | None = None,
 ) -> str:
     """Fetch recent events from *db* and return them as CSV text."""
-    events = db.recent_events(limit=limit)
+    events = db.recent_events(limit=limit, deployment_id=deployment_id)
     if device_id:
         events = [e for e in events if e.get("device_id") == device_id]
     return events_to_csv(events)
@@ -112,6 +113,7 @@ def export_detections_csv(
     label: str | None = None,
     min_confidence: float = 0.0,
     species: str | None = None,
+    deployment_id: str | None = None,
 ) -> str:
     """Fetch recent inference results from *db* and return them as CSV text."""
     results = db.list_inference_results(
@@ -119,6 +121,7 @@ def export_detections_csv(
         label=label,
         min_confidence=min_confidence,
         species=species,
+        deployment_id=deployment_id,
     )
     return detections_to_csv(results)
 

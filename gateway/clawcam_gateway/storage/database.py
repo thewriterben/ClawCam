@@ -608,13 +608,17 @@ class GatewayDatabase:
         if review_state not in REVIEW_STATES:
             raise ValueError(f"invalid review_state: {review_state!r}")
         with self.connect() as conn:
+            ev = conn.execute(
+                "SELECT deployment_id FROM events WHERE event_id = ?", (event_id,)
+            ).fetchone()
+            deployment_id = ev["deployment_id"] if ev else "default"
             conn.execute(
                 """
                 INSERT INTO inference_results
                     (event_id, media_path, model_name, model_version,
                      detections_json, top_label, top_confidence, top_species,
-                     review_state)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     review_state, deployment_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event_id,
@@ -626,6 +630,7 @@ class GatewayDatabase:
                     d.get("top_confidence"),
                     d.get("top_species"),
                     review_state,
+                    deployment_id,
                 ),
             )
 
@@ -693,6 +698,7 @@ class GatewayDatabase:
         label: str | None = None,
         min_confidence: float = 0.0,
         species: str | None = None,
+        deployment_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """List recent inference results with optional filtering."""
         clauses = ["top_confidence >= ?"]
@@ -703,6 +709,9 @@ class GatewayDatabase:
         if species:
             clauses.append("top_species LIKE ?")
             params.append(f"%{species}%")
+        if deployment_id:
+            clauses.append("deployment_id = ?")
+            params.append(deployment_id)
         where = " AND ".join(clauses)
         params.append(limit)
         with self.connect() as conn:
@@ -1730,13 +1739,17 @@ class GatewayDatabase:
     def add_alert_event(self, event: dict[str, Any]) -> None:
         """Persist a fired alert event row."""
         with self.connect() as conn:
+            ev = conn.execute(
+                "SELECT deployment_id FROM events WHERE event_id = ?", (event.get("event_id"),)
+            ).fetchone()
+            deployment_id = ev["deployment_id"] if ev else "default"
             conn.execute(
                 """
                 INSERT INTO alert_events
                     (alert_event_id, rule_id, rule_name, event_id, device_id,
                      top_label, top_confidence, top_species, webhook_url,
-                     delivery_status, webhook_response, fired_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     delivery_status, webhook_response, fired_at, deployment_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event["alert_event_id"],
@@ -1751,6 +1764,7 @@ class GatewayDatabase:
                     event.get("delivery_status", "pending"),
                     event.get("webhook_response"),
                     event.get("fired_at"),
+                    deployment_id,
                 ),
             )
 
@@ -1759,6 +1773,7 @@ class GatewayDatabase:
         limit: int = 25,
         rule_id: str | None = None,
         delivery_status: str | None = None,
+        deployment_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return recent alert events with optional filtering."""
         clauses = []
@@ -1769,6 +1784,9 @@ class GatewayDatabase:
         if delivery_status:
             clauses.append("delivery_status = ?")
             params.append(delivery_status)
+        if deployment_id:
+            clauses.append("deployment_id = ?")
+            params.append(deployment_id)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         params.append(limit)
         with self.connect() as conn:
