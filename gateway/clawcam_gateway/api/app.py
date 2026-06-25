@@ -23,6 +23,7 @@ from clawcam_gateway.api.auth_dependency import (
     require_write,
 )
 from clawcam_gateway.api.dashboard import render_dashboard
+from clawcam_gateway.api.ops_dashboard import render_ops_dashboard
 from clawcam_gateway.auth import (
     AuthContext,
     SCOPES,
@@ -1102,6 +1103,11 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     @app.get("/dashboard", response_class=HTMLResponse)
     def dashboard(limit: int = 25) -> HTMLResponse:
         return HTMLResponse(render_dashboard(_dashboard_payload(db, config, limit)))
+
+    @app.get("/ops", response_class=HTMLResponse)
+    def ops_dashboard() -> HTMLResponse:
+        """Live, self-refreshing ops dashboard (polls the JSON API, same-origin)."""
+        return HTMLResponse(render_ops_dashboard())
 
     return app
 

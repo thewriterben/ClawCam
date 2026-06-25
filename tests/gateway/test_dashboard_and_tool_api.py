@@ -65,3 +65,21 @@ def test_unknown_tool_returns_404(tmp_path) -> None:
 
     response = client.post("/api/v1/tools/unknown_tool", json={"arguments": {}})
     assert response.status_code == 404
+
+
+def test_ops_dashboard_route_serves_live_spa(tmp_path) -> None:
+    """GET /ops returns the self-contained live ops dashboard SPA."""
+    db_path = tmp_path / "gateway.db"
+    GatewayDatabase(db_path)  # initialize schema
+    app = create_app(GatewayConfig(database_path=db_path, media_dir=tmp_path / "media"))
+    client = TestClient(app)
+
+    resp = client.get("/ops")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    body = resp.text
+    # Self-contained SPA markers + the endpoints it polls.
+    assert "ClawCam" in body
+    assert "/api/v1/dashboard" in body
+    assert "/api/v1/metrics" in body
+    assert "X-API-Key" in body  # honors auth when enabled
