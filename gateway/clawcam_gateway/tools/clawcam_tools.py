@@ -585,6 +585,65 @@ def create_alert_rule(
     }
 
 
+def list_profile_alert_templates(context: ToolContext, profile: str) -> dict[str, Any]:
+    """List the recommended alert-rule templates for a device *profile*.
+
+    Read-only preview — does not create anything. Use apply_profile_alert_rules
+    to actually seed the rules onto a device.
+    """
+    from clawcam_gateway.alerts.templates import alert_rule_templates_for_profile
+    from clawcam_gateway.profiles import is_valid_profile
+    if not is_valid_profile(profile):
+        return {"ok": False, "error": f"unknown profile: {profile}"}
+    templates = alert_rule_templates_for_profile(profile)
+    return {"ok": True, "profile": profile, "count": len(templates), "templates": templates}
+
+
+def apply_profile_alert_rules(
+    context: ToolContext,
+    device_id: str,
+    enabled: bool = True,
+) -> dict[str, Any]:
+    """Seed a device with the recommended alert rules for its profile.
+
+    Resolves the device's profile, builds the template rules, and persists one
+    alert rule per template (scoped to this device). Approval-gated — creates
+    gateway state. Returns the rules that were created (may be empty for
+    profiles with no opinionated rules).
+    """
+    from clawcam_gateway.alerts.templates import alert_rule_templates_for_profile
+    from clawcam_gateway.profiles import DEFAULT_PROFILE
+    device = context.db.get_device(device_id)
+    if device is None:
+        return {"ok": False, "error": f"unknown device: {device_id}", "device_id": device_id}
+    profile = device.get("profile") or DEFAULT_PROFILE
+    templates = alert_rule_templates_for_profile(profile)
+    created: list[dict[str, Any]] = []
+    for t in templates:
+        rule = {
+            "rule_id": f"rule-{uuid.uuid4().hex[:12]}",
+            "name": t["name"],
+            "label": t["label"],
+            "min_confidence": float(t["min_confidence"]),
+            "species_pattern": t["species_pattern"],
+            "device_id": device_id,
+            "webhook_url": None,
+            "enabled": bool(enabled and t.get("enabled", True)),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "required_state": t["required_state"],
+        }
+        context.db.add_alert_rule(rule)
+        created.append(rule)
+    return {
+        "ok": True,
+        "device_id": device_id,
+        "profile": profile,
+        "created_count": len(created),
+        "rules": created,
+        "message": f"Seeded {len(created)} alert rule(s) from the '{profile}' profile.",
+    }
+
+
 def list_profiles(context: ToolContext) -> dict[str, Any]:
     """List all available device profiles with their behavioral defaults."""
     from clawcam_gateway.profiles import PROFILES, get_profile_defaults

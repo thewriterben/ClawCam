@@ -42,6 +42,7 @@ APPROVAL_REQUIRED_TOOLS: frozenset[str] = frozenset(
         "apply_config_patch",
         "queue_firmware_update",
         "create_alert_rule",
+        "apply_profile_alert_rules",
         "set_device_state",
         "set_deployment_state",
         "create_schedule",
@@ -216,6 +217,29 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "name": "list_profiles",
         "description": "List all available ClawCam device profiles (wildlife trail cam, home security, bird feeder, livestock, apiary, garden, driveway, etc.) with their per-profile defaults: detectors to run, capture cadence, audio on/off, alert priorities.",
         "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_profile_alert_templates",
+        "description": "Preview the recommended alert rules for a device profile (e.g. livestock predator alerts, security person/vehicle alerts) without creating anything. Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["profile"],
+            "properties": {
+                "profile": {"type": "string", "description": "Profile name, e.g. 'livestock_watch' or 'driveway'."},
+            },
+        },
+    },
+    {
+        "name": "apply_profile_alert_rules",
+        "description": "Seed a device with the recommended alert rules for its profile (one rule per template, scoped to the device). Approval-gated — creates gateway state.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["device_id"],
+            "properties": {
+                "device_id": {"type": "string", "description": "Device to seed alert rules onto."},
+                "enabled": {"type": "boolean", "default": True, "description": "Create the rules enabled (default true)."},
+            },
+        },
     },
     {
         "name": "get_device_state",

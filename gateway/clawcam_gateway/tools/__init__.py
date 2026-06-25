@@ -3,6 +3,7 @@
 from clawcam_gateway.tools.clawcam_tools import (
     ToolContext,
     apply_config_patch,
+    apply_profile_alert_rules,
     capture_now,
     create_alert_rule,
     create_detection_zone,
@@ -25,6 +26,7 @@ from clawcam_gateway.tools.clawcam_tools import (
     list_firmware_builds,
     list_observations_for_review,
     list_pending_commands,
+    list_profile_alert_templates,
     list_profiles,
     list_recent_alerts,
     list_schedule_runs,
@@ -41,6 +43,7 @@ from clawcam_gateway.tools.clawcam_tools import (
 __all__ = [
     "ToolContext",
     "apply_config_patch",
+    "apply_profile_alert_rules",
     "capture_now",
     "create_alert_rule",
     "create_detection_zone",
@@ -63,6 +66,7 @@ __all__ = [
     "list_firmware_builds",
     "list_observations_for_review",
     "list_pending_commands",
+    "list_profile_alert_templates",
     "list_profiles",
     "list_recent_alerts",
     "list_schedule_runs",
