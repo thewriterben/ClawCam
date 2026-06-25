@@ -472,6 +472,10 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         })
 
         background_tasks.add_task(audio_pipeline.run, audio_id, str(dest), event_id)
+        # Evaluate alert rules against the acoustic classifications once stored.
+        background_tasks.add_task(
+            alert_evaluator.evaluate_audio, event_id, event_row.get("device_id"), audio_id,
+        )
         return {
             "ok": True,
             "audio_id": audio_id,

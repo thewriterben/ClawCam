@@ -91,6 +91,46 @@ class AlertEvaluator:
 
         return fired
 
+    def evaluate_audio(self, event_id: str, device_id: str | None = None,
+                       audio_id: int | None = None) -> int:
+        """Check enabled rules against the audio classifications for an event.
+
+        Mirrors :meth:`evaluate` for the acoustic pipeline: each stored audio
+        classification (glass_break, alarm, scream, ...) is shaped like an
+        inference result and matched against the rules. Fires + persists alert
+        events for matches. Never raises.
+        """
+        try:
+            classifications = self._db.list_audio_classifications(
+                audio_id=audio_id, event_id=event_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("AlertEvaluator: could not fetch audio for %s: %s", event_id, exc)
+            return 0
+        if not classifications:
+            return 0
+        try:
+            rules = self._db.list_alert_rules(enabled_only=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("AlertEvaluator: could not load rules: %s", exc)
+            return 0
+
+        current_state = self._resolve_state(device_id)
+        fired = 0
+        for c in classifications:
+            pseudo = {
+                "top_label": c.get("label"),
+                "top_confidence": c.get("confidence") or 0.0,
+                "top_species": c.get("species"),
+                "event_id": event_id,
+            }
+            for rule_dict in rules:
+                rule = AlertRule.from_dict(rule_dict)
+                if rule.matches(pseudo, device_id=device_id, current_state=current_state):
+                    fired += 1
+                    self._fire(rule, pseudo, event_id, device_id)
+        return fired
+
     def _resolve_state(self, device_id: str | None) -> str | None:
         """Return the effective state for a device, or None on lookup error."""
         if device_id is None:

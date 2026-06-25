@@ -26,9 +26,9 @@ def test_security_and_driveway_templates():
     assert {t["label"] for t in outdoor} == {"person", "vehicle"}
 
     indoor = alert_rule_templates_for_profile("home_security_indoor")
-    assert len(indoor) == 1
-    assert indoor[0]["label"] == "person"
-    assert indoor[0]["required_state"] == "armed"
+    assert {t["label"] for t in indoor} == {"person", "glass_break"}
+    person = next(t for t in indoor if t["label"] == "person")
+    assert person["required_state"] == "armed"
 
     driveway = alert_rule_templates_for_profile("driveway")
     assert {t["label"] for t in driveway} == {"person", "vehicle"}

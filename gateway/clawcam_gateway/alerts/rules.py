@@ -14,6 +14,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+# Labels an alert rule may match: visual detection labels (MegaDetector) plus
+# acoustic event labels emitted by the audio pipeline.
+ALERT_LABELS: frozenset[str] = frozenset({
+    "animal", "person", "vehicle",
+    "glass_break", "alarm", "scream", "gunshot", "bird", "dog_bark",
+})
+
 
 @dataclass
 class AlertRule:

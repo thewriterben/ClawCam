@@ -702,3 +702,61 @@ class TestAlertConfig:
         monkeypatch.setenv("CLAWCAM_ALERT_WEBHOOK_URL", "")
         cfg = GatewayConfig.from_env()
         assert cfg.alert_webhook_url is None
+
+
+# ── Acoustic-event alerting (audio → AlertEvaluator) ─────────────────────────
+
+class TestAudioAlerting:
+    def _seed_event(self, db: GatewayDatabase, event_id: str = "evt-audio", device_id: str = "cam-au"):
+        db.add_event({
+            "event_id": event_id, "event_type": "capture", "device_id": device_id,
+            "timestamp": "2026-05-12T00:00:00Z", "source": "node", "media": [],
+        })
+
+    def _add_audio(self, db: GatewayDatabase, event_id: str, label: str, conf: float,
+                   species: str | None = None):
+        db.add_audio_classification({
+            "audio_id": 1, "event_id": event_id,
+            "classifier_name": "yamnet_alarm", "classifier_version": "0.1.0",
+            "label": label, "species": species, "confidence": conf,
+            "time_offset_s": 0.0, "duration_s": 0.0,
+        })
+
+    def test_glass_break_audio_fires_matching_rule(self, tmp_path: Path):
+        db = GatewayDatabase(tmp_path / "g.db")
+        self._seed_event(db)
+        db.add_alert_rule({
+            "rule_id": "r-gb", "name": "Glass break", "label": "glass_break",
+            "min_confidence": 0.3, "enabled": True,
+        })
+        self._add_audio(db, "evt-audio", "glass_break", 0.92)
+
+        fired = AlertEvaluator(db).evaluate_audio("evt-audio", device_id="cam-au")
+        assert fired == 1
+        events = db.list_alert_events()
+        assert any(e["event_id"] == "evt-audio" for e in events)
+
+    def test_non_matching_audio_label_does_not_fire(self, tmp_path: Path):
+        db = GatewayDatabase(tmp_path / "g.db")
+        self._seed_event(db)
+        db.add_alert_rule({
+            "rule_id": "r-gb2", "name": "Glass break", "label": "glass_break",
+            "min_confidence": 0.3, "enabled": True,
+        })
+        self._add_audio(db, "evt-audio", "bird", 0.95, species="American Robin")
+        assert AlertEvaluator(db).evaluate_audio("evt-audio", device_id="cam-au") == 0
+
+    def test_low_confidence_audio_does_not_fire(self, tmp_path: Path):
+        db = GatewayDatabase(tmp_path / "g.db")
+        self._seed_event(db)
+        db.add_alert_rule({
+            "rule_id": "r-gb3", "name": "Glass break", "label": "glass_break",
+            "min_confidence": 0.8, "enabled": True,
+        })
+        self._add_audio(db, "evt-audio", "glass_break", 0.5)  # below threshold
+        assert AlertEvaluator(db).evaluate_audio("evt-audio", device_id="cam-au") == 0
+
+    def test_no_audio_classifications_is_noop(self, tmp_path: Path):
+        db = GatewayDatabase(tmp_path / "g.db")
+        self._seed_event(db)
+        assert AlertEvaluator(db).evaluate_audio("evt-audio", device_id="cam-au") == 0

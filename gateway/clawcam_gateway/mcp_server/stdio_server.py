@@ -205,8 +205,9 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "properties": {
                 "name": {"type": "string", "description": "Human-readable rule name."},
                 "webhook_url": {"type": "string", "description": "HTTP(S) endpoint to POST alert payload."},
-                "label": {"type": "string", "enum": ["animal", "person", "vehicle"],
-                          "description": "Restrict to this detection category. Omit for any."},
+                "label": {"type": "string",
+                          "enum": ["animal", "person", "vehicle", "glass_break", "alarm", "scream", "gunshot", "bird", "dog_bark"],
+                          "description": "Restrict to this detection/audio label. Omit for any."},
                 "min_confidence": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5},
                 "species_pattern": {"type": "string", "description": "Case-insensitive species substring (e.g. 'bear')."},
                 "device_id": {"type": "string", "description": "Only fire for this device."},

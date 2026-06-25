@@ -9,10 +9,9 @@ Templates are partial: they carry ``name``, ``label``, ``min_confidence``,
 ``species_pattern``, ``required_state``, and ``enabled`` — the caller assigns
 ``rule_id``, ``created_at``, ``device_id``, and ``webhook_url`` when persisting.
 
-Note: the alert evaluator runs on *visual* inference results (labels
-``animal``/``person``/``vehicle`` + species). Acoustic events (glass_break, etc.)
-are scored in the audio pipeline and aren't yet routed through alert rules, so
-these templates intentionally cover the visual labels only.
+Templates cover both visual labels (``animal``/``person``/``vehicle``) and
+acoustic event labels (``glass_break``, etc.) — the audio pipeline now feeds the
+alert evaluator via ``AlertEvaluator.evaluate_audio``.
 """
 
 from __future__ import annotations
@@ -66,6 +65,8 @@ def alert_rule_templates_for_profile(profile: str) -> list[dict[str, Any]]:
         # Only fire while the device/deployment is armed.
         out.append(_template("Person detected (armed)", label="person",
                              min_confidence=mc, required_state="armed"))
+        # Acoustic intrusion — fires regardless of armed/disarmed state.
+        out.append(_template("Glass break detected", label="glass_break", min_confidence=0.4))
     elif profile == PROFILE_WILDLIFE:
         # Human presence on a wildlife cam is worth flagging (e.g. intrusion).
         out.append(_template("Human presence", label="person",

@@ -556,11 +556,11 @@ def create_alert_rule(
     if not name or not name.strip():
         return {"ok": False, "error": "name is required"}
 
-    allowed_labels = {"animal", "person", "vehicle", None}
-    if label not in allowed_labels:
+    from clawcam_gateway.alerts.rules import ALERT_LABELS
+    if label is not None and label not in ALERT_LABELS:
         return {
             "ok": False,
-            "error": f"label must be one of: animal, person, vehicle (got {label!r})",
+            "error": f"label must be one of: {', '.join(sorted(ALERT_LABELS))} (got {label!r})",
         }
 
     safe_confidence = max(0.0, min(float(min_confidence), 1.0))
