@@ -8,6 +8,7 @@ ACTION_SET_DEPLOYMENT_STATE = "set_deployment_state"
 ACTION_ENABLE_RULE = "enable_rule"
 ACTION_DISABLE_RULE = "disable_rule"
 ACTION_WEBHOOK = "webhook"
+ACTION_ALERT_DIGEST = "alert_digest"
 
 ACTION_TYPES: tuple[str, ...] = (
     ACTION_SET_STATE,
@@ -15,6 +16,7 @@ ACTION_TYPES: tuple[str, ...] = (
     ACTION_ENABLE_RULE,
     ACTION_DISABLE_RULE,
     ACTION_WEBHOOK,
+    ACTION_ALERT_DIGEST,
 )
 
 

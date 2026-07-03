@@ -997,6 +997,23 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         )
         return {"ok": True, "alerts": events, "count": len(events)}
 
+    @app.get("/api/v1/alerts/digest")
+    def alert_digest_endpoint(
+        window_s: int = 86400,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Roll up alert events over a trailing window (default 24h) by rule and species."""
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+        from clawcam_gateway.alerts.digest import build_alert_digest
+
+        window_s = max(1, int(window_s))
+        since = (_dt.now(_tz.utc) - _td(seconds=window_s)).isoformat()
+        events = db.list_alert_events(
+            limit=100_000, since=since, deployment_id=_deployment_scope(auth),
+        )
+        return {"ok": True, "digest": build_alert_digest(events, window_label=f"{window_s}s")}
+
     # ── Data export (Phase 5) ────────────────────────────────────────────
 
     @app.get("/api/v1/export/events.csv")

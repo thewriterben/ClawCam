@@ -27,10 +27,11 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 from clawcam_gateway.scheduler.actions import (
+    ACTION_ALERT_DIGEST,
     ACTION_DISABLE_RULE,
     ACTION_ENABLE_RULE,
     ACTION_SET_DEPLOYMENT_STATE,
@@ -221,6 +222,8 @@ class ScheduleEngine:
                 return self._action_toggle_rule(sched_id, payload, enabled=False)
             if action_type == ACTION_WEBHOOK:
                 return self._action_webhook(sched_id, payload)
+            if action_type == ACTION_ALERT_DIGEST:
+                return self._action_alert_digest(sched_id, payload)
             return ScheduleRunResult(
                 schedule_id=sched_id, status="failed", detail={},
                 error=f"unknown action_type: {action_type}",
@@ -291,5 +294,31 @@ class ScheduleEngine:
             sched_id,
             status="success" if success else "failed",
             detail={"url": url, "http_status": status_code},
+            error=error,
+        )
+
+    def _action_alert_digest(self, sched_id: str, payload: dict[str, Any]) -> ScheduleRunResult:
+        """Roll up recent alert events and POST the digest to a webhook.
+
+        Payload: ``url`` (required), ``window_s`` (default 86400 = daily). Mirrors
+        Oh-Ben-Claw's periodic escalation digest.
+        """
+        from clawcam_gateway.alerts.digest import build_alert_digest
+
+        url = payload.get("url")
+        if not url:
+            return ScheduleRunResult(sched_id, status="failed", detail=payload,
+                                     error="alert_digest action requires url")
+        window_s = int(payload.get("window_s", 86400))
+        since = (datetime.now(timezone.utc) - timedelta(seconds=window_s)).isoformat()
+        events = self._db.list_alert_events(limit=100_000, since=since)
+        digest = build_alert_digest(events, window_label=f"{window_s}s")
+        success, status_code, error = self._deliver_webhook(url, digest)
+        return ScheduleRunResult(
+            sched_id,
+            status="success" if success else "failed",
+            detail={"url": url, "http_status": status_code,
+                    "total_alerts": digest["total_alerts"],
+                    "suppressed_total": digest["suppressed_total"]},
             error=error,
         )

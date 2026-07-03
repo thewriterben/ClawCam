@@ -202,8 +202,13 @@ knobs are off/neutral by default, so existing deployments are unaffected.
 4. **Tests**: `tests/gateway/test_alert_severity_dedup.py` (6/6) — severity ordering +
    persistence, the min-severity record-but-skip gate, at/above-threshold delivery, the
    dedup rollup, and dedup-off-by-default.
-5. **Follow-up (planned)**: a periodic alert **digest** (roll up `alert_events` by rule
-   /species on a schedule), completing the OBC mirror.
+5. **Periodic digest** (`alerts/digest.py`): `build_alert_digest()` rolls `alert_events`
+   up by rule and by species over a trailing window (totals, delivered/skipped counts,
+   and the de-duplicated `suppressed_total`). Delivered on a schedule via the new
+   scheduler **`alert_digest`** action (`{url, window_s}`, reuses the webhook deliverer),
+   or pulled from `GET /api/v1/alerts/digest?window_s=…`. Tests:
+   `tests/gateway/test_alert_digest.py` — the pure roll-up, the `since` window query, and
+   the scheduler action (via an injected deliverer). Completes the OBC mirror.
 
 ## Phase 5 Complete — Data Export, Cloud Retry, Dashboard Enrichment
 

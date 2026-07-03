@@ -1833,8 +1833,13 @@ class GatewayDatabase:
         rule_id: str | None = None,
         delivery_status: str | None = None,
         deployment_id: str | None = None,
+        since: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Return recent alert events with optional filtering."""
+        """Return recent alert events with optional filtering.
+
+        *since* (ISO 8601) restricts to events fired at or after that time — used by the
+        digest to roll up a trailing window.
+        """
         clauses = []
         params: list[Any] = []
         if rule_id:
@@ -1846,6 +1851,9 @@ class GatewayDatabase:
         if deployment_id:
             clauses.append("deployment_id = ?")
             params.append(deployment_id)
+        if since:
+            clauses.append("fired_at >= ?")
+            params.append(since)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         params.append(limit)
         with self.connect() as conn:
