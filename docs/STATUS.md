@@ -210,6 +210,24 @@ knobs are off/neutral by default, so existing deployments are unaffected.
    `tests/gateway/test_alert_digest.py` — the pure roll-up, the `since` window query, and
    the scheduler action (via an injected deliverer). Completes the OBC mirror.
 
+## Detection Analytics — Species Activity Report
+
+A pure, storage-agnostic roll-up of *when* each subject is active — the question a
+wildlife operator actually asks ("are the coyotes nocturnal at this site?").
+
+1. **`analytics/activity.py`** — `build_activity_report(detections, tz_offset_hours=0)`:
+   per-subject hour-of-day histogram, total count, first/last seen, peak hour, and a
+   **diel-pattern** classification (nocturnal / diurnal / crepuscular / cathemeral) from
+   the hour bands. No DB or framework imports, so it unit-tests in isolation and is
+   reusable from REST, MCP tools, or the brain adapter.
+2. **REST**: `GET /api/v1/analytics/activity` (`limit`, `species`, `min_confidence`,
+   `tz_offset_hours`) fetches recent `inference_results` and returns the report.
+3. **Tests**: `tests/gateway/test_activity_report.py` (8/8, import-isolated) — counts /
+   peak / ranking, each diel pattern, the timezone-offset shift, and the `top_label`
+   fallback + first/last-seen.
+4. **Follow-up**: expose as an MCP tool (`get_activity_report`, auto-approved) so the
+   brain can ask "when are deer active here?" directly.
+
 ## Phase 5 Complete — Data Export, Cloud Retry, Dashboard Enrichment
 
 Phase 5 adds structured data export, cloud resilience, and a richer operator dashboard:

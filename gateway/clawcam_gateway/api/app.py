@@ -1014,6 +1014,29 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         )
         return {"ok": True, "digest": build_alert_digest(events, window_label=f"{window_s}s")}
 
+    @app.get("/api/v1/analytics/activity")
+    def activity_report_endpoint(
+        limit: int = 5000,
+        species: str | None = None,
+        min_confidence: float = 0.0,
+        tz_offset_hours: int = 0,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Per-subject hour-of-day activity + diel pattern over recent detections."""
+        from clawcam_gateway.analytics.activity import build_activity_report
+
+        safe_limit = max(1, min(int(limit), 50_000))
+        dets = db.list_inference_results(
+            limit=safe_limit,
+            species=species,
+            min_confidence=min_confidence,
+            deployment_id=_deployment_scope(auth),
+        )
+        return {
+            "ok": True,
+            "report": build_activity_report(dets, tz_offset_hours=int(tz_offset_hours)),
+        }
+
     # ── Data export (Phase 5) ────────────────────────────────────────────
 
     @app.get("/api/v1/export/events.csv")
