@@ -35,6 +35,15 @@ class GatewayConfig:
     # Alerting (webhook notifications on inference results)
     alert_webhook_url: str | None = None  # global default; rules may override per-rule
     webhook_allow_private_hosts: bool = False  # allow webhook delivery to private/loopback IPs (LAN/dev)
+    # Alert de-duplication: suppress repeat alerts for the same (rule, device, label,
+    # species) within this many seconds; the suppressed count is rolled onto the last
+    # delivered alert. 0 disables de-dup (every match fires). A camera trap sees the same
+    # animal many times a minute, so this is the knob that stops webhook spam.
+    alert_dedup_window_s: int = 0
+    # Global minimum severity a rule must have for its webhook to actually deliver
+    # ("info"/"warning"/"critical"). Below it, the alert is still recorded — webhook is
+    # skipped. Default "info" = deliver everything.
+    alert_min_severity: str = "info"
     # Authentication and multi-tenancy (Phase 7)
     auth_enabled: bool = False           # off by default; existing deployments unaffected
     default_deployment_id: str = "default"
@@ -71,6 +80,8 @@ class GatewayConfig:
             cloud_endpoint_url=os.getenv("CLAWCAM_CLOUD_ENDPOINT_URL"),
             alert_webhook_url=os.getenv("CLAWCAM_ALERT_WEBHOOK_URL") or None,
             webhook_allow_private_hosts=os.getenv("CLAWCAM_WEBHOOK_ALLOW_PRIVATE_HOSTS", "").lower() in ("1", "true", "yes"),
+            alert_dedup_window_s=int(os.getenv("CLAWCAM_ALERT_DEDUP_WINDOW_S", "0")),
+            alert_min_severity=os.getenv("CLAWCAM_ALERT_MIN_SEVERITY", "info").strip().lower() or "info",
             auth_enabled=os.getenv("CLAWCAM_AUTH_ENABLED", "false").lower() == "true",
             default_deployment_id=os.getenv("CLAWCAM_DEFAULT_DEPLOYMENT", "default"),
             scheduler_enabled=os.getenv("CLAWCAM_SCHEDULER_ENABLED", "false").lower() == "true",

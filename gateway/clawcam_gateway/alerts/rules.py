@@ -21,6 +21,16 @@ ALERT_LABELS: frozenset[str] = frozenset({
     "glass_break", "alarm", "scream", "gunshot", "bird", "dog_bark",
 })
 
+# Severity levels for alert routing, ordered low → high. A rule declares its severity;
+# the gateway's ``alert_min_severity`` gate decides whether the webhook actually delivers
+# (below it, the alert is still recorded). Mirrors Oh-Ben-Claw's escalation severities.
+SEVERITY_RANK: dict[str, int] = {"info": 0, "warning": 1, "critical": 2}
+
+
+def severity_rank(severity: str | None) -> int:
+    """Numeric rank of a severity name; unknown/None → ``warning`` (1)."""
+    return SEVERITY_RANK.get((severity or "warning").strip().lower(), 1)
+
 
 @dataclass
 class AlertRule:
@@ -54,6 +64,9 @@ class AlertRule:
     # Phase 8: rule fires only when the device or its deployment is in this state.
     # None = state-agnostic (fires regardless of state).
     required_state: str | None = None
+    # Severity of alerts this rule raises ("info"/"warning"/"critical"). Used by the
+    # gateway's minimum-severity delivery gate. Defaults to "warning".
+    severity: str = "warning"
 
     # ── Matching ──────────────────────────────────────────────────────────
 
@@ -117,6 +130,7 @@ class AlertRule:
             "enabled": self.enabled,
             "created_at": self.created_at,
             "required_state": self.required_state,
+            "severity": self.severity,
         }
 
     @classmethod
@@ -132,4 +146,5 @@ class AlertRule:
             enabled=bool(d.get("enabled", True)),
             created_at=d.get("created_at", ""),
             required_state=d.get("required_state"),
+            severity=(d.get("severity") or "warning"),
         )

@@ -123,7 +123,9 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     cloud_store = get_cloud_store(config)
     cloud_worker = CloudUploadWorker(db=db, store=cloud_store)
     alert_evaluator = AlertEvaluator(db=db, default_webhook=config.alert_webhook_url,
-                                     allow_private_hosts=config.webhook_allow_private_hosts)
+                                     allow_private_hosts=config.webhook_allow_private_hosts,
+                                     dedup_window_s=config.alert_dedup_window_s,
+                                     min_severity=config.alert_min_severity)
     schedule_engine = ScheduleEngine(db=db, allow_private_hosts=config.webhook_allow_private_hosts)
     audio_pipeline = AudioPipeline(db=db, enabled=config.audio_enabled)
     bridge = MQTTBridge(
@@ -943,6 +945,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             "webhook_url": data.get("webhook_url") or config.alert_webhook_url,
             "enabled": bool(data.get("enabled", True)),
             "created_at": _dt.now(_tz.utc).isoformat(),
+            "severity": (data.get("severity") or "warning"),
         }
         db.add_alert_rule(rule)
         return {"ok": True, "rule": rule}

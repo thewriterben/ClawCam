@@ -182,6 +182,29 @@ Phase 6 adds a persistent, configurable alerting system so operators are notifie
 7. **`CLAWCAM_ALERT_WEBHOOK_URL`** env var: global default webhook used when a rule has no
    individual URL set. Empty/unset = no delivery (rule still fires and is recorded).
 
+## Alert Polish — Severity & De-duplication (mirrors Oh-Ben-Claw notifications)
+
+Brings OBC's escalation-notification polish to ClawCam's alert engine (Phase 6). Both
+knobs are off/neutral by default, so existing deployments are unaffected.
+
+1. **Rule severity** (`alerts/rules.py`): each `AlertRule` declares a severity —
+   `info` / `warning` / `critical` (default `warning`). Persisted on `alert_rules`
+   (migration-added column), settable via `POST /api/v1/alert-rules` and `PATCH`.
+   `severity_rank()` orders the levels.
+2. **Minimum-severity delivery gate** (`CLAWCAM_ALERT_MIN_SEVERITY`, default `info`):
+   a rule below the gate is still **recorded** as an `alert_event` (delivery_status
+   `skipped_severity`) but its webhook is not sent — "record everything, push only the
+   loud stuff". The severity rides in the webhook payload for downstream routing.
+3. **De-duplication** (`CLAWCAM_ALERT_DEDUP_WINDOW_S`, default `0` = off): a repeat of
+   the same `(rule, device, label, species)` within the window is collapsed onto the
+   last delivered alert (its `suppressed_count` is bumped) — no new row, no webhook.
+   Stops a camera trap from firing a hundred webhooks at one lingering deer.
+4. **Tests**: `tests/gateway/test_alert_severity_dedup.py` (6/6) — severity ordering +
+   persistence, the min-severity record-but-skip gate, at/above-threshold delivery, the
+   dedup rollup, and dedup-off-by-default.
+5. **Follow-up (planned)**: a periodic alert **digest** (roll up `alert_events` by rule
+   /species on a schedule), completing the OBC mirror.
+
 ## Phase 5 Complete — Data Export, Cloud Retry, Dashboard Enrichment
 
 Phase 5 adds structured data export, cloud resilience, and a richer operator dashboard:

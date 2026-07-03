@@ -361,6 +361,10 @@ class GatewayDatabase:
             self._add_column_if_missing(conn, "deployments", "state", "TEXT NOT NULL DEFAULT 'normal'")
             # Alert rules gain an optional state gate
             self._add_column_if_missing(conn, "alert_rules", "required_state", "TEXT")
+            # Alert polish: rule severity + per-event severity/de-dup rollup.
+            self._add_column_if_missing(conn, "alert_rules", "severity", "TEXT NOT NULL DEFAULT 'warning'")
+            self._add_column_if_missing(conn, "alert_events", "severity", "TEXT")
+            self._add_column_if_missing(conn, "alert_events", "suppressed_count", "INTEGER NOT NULL DEFAULT 0")
             # Phase 12: per-device detector chain override
             self._add_column_if_missing(conn, "devices", "detector_chain_json", "TEXT")
             # S1 (Remember): first-class human-review state on AI classifications.
@@ -1666,8 +1670,8 @@ class GatewayDatabase:
                 """
                 INSERT INTO alert_rules
                     (rule_id, name, label, min_confidence, species_pattern,
-                     device_id, webhook_url, enabled, required_state)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     device_id, webhook_url, enabled, required_state, severity)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     rule["rule_id"],
@@ -1679,6 +1683,7 @@ class GatewayDatabase:
                     rule.get("webhook_url"),
                     1 if rule.get("enabled", True) else 0,
                     rule.get("required_state"),
+                    (rule.get("severity") or "warning"),
                 ),
             )
 
@@ -1688,7 +1693,7 @@ class GatewayDatabase:
             row = conn.execute(
                 """
                 SELECT rule_id, name, label, min_confidence, species_pattern,
-                       device_id, webhook_url, enabled, created_at, required_state
+                       device_id, webhook_url, enabled, created_at, required_state, severity
                 FROM alert_rules WHERE rule_id = ?
                 """,
                 (rule_id,),
@@ -1706,7 +1711,7 @@ class GatewayDatabase:
             rows = conn.execute(
                 f"""
                 SELECT rule_id, name, label, min_confidence, species_pattern,
-                       device_id, webhook_url, enabled, created_at, required_state
+                       device_id, webhook_url, enabled, created_at, required_state, severity
                 FROM alert_rules {where}
                 ORDER BY created_at DESC
                 """
@@ -1721,7 +1726,7 @@ class GatewayDatabase:
     def update_alert_rule(self, rule_id: str, updates: dict[str, Any]) -> bool:
         """Apply *updates* dict to an existing alert rule. Returns True if found."""
         allowed = {"name", "label", "min_confidence", "species_pattern",
-                   "device_id", "webhook_url", "enabled", "required_state"}
+                   "device_id", "webhook_url", "enabled", "required_state", "severity"}
         sets = []
         params: list[Any] = []
         for key, val in updates.items():
@@ -1764,8 +1769,9 @@ class GatewayDatabase:
                 INSERT INTO alert_events
                     (alert_event_id, rule_id, rule_name, event_id, device_id,
                      top_label, top_confidence, top_species, webhook_url,
-                     delivery_status, webhook_response, fired_at, deployment_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     delivery_status, webhook_response, fired_at, deployment_id,
+                     severity, suppressed_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event["alert_event_id"],
@@ -1781,7 +1787,44 @@ class GatewayDatabase:
                     event.get("webhook_response"),
                     event.get("fired_at"),
                     deployment_id,
+                    event.get("severity"),
+                    int(event.get("suppressed_count", 0)),
                 ),
+            )
+
+    def find_recent_alert_event(
+        self,
+        rule_id: str,
+        device_id: str | None,
+        top_label: str | None,
+        top_species: str | None,
+        since: str,
+    ) -> dict[str, Any] | None:
+        """Most recent alert event for the same (rule, device, label, species) fired at
+        or after *since* (ISO 8601). Used for de-duplication."""
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT alert_event_id, fired_at, suppressed_count
+                FROM alert_events
+                WHERE rule_id = ?
+                  AND IFNULL(device_id, '') = IFNULL(?, '')
+                  AND IFNULL(top_label, '') = IFNULL(?, '')
+                  AND IFNULL(top_species, '') = IFNULL(?, '')
+                  AND fired_at >= ?
+                ORDER BY fired_at DESC
+                LIMIT 1
+                """,
+                (rule_id, device_id, top_label, top_species, since),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def increment_alert_event_suppressed(self, alert_event_id: str) -> None:
+        """Bump the suppressed_count on an alert event (a repeat was collapsed onto it)."""
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE alert_events SET suppressed_count = suppressed_count + 1 WHERE alert_event_id = ?",
+                (alert_event_id,),
             )
 
     def list_alert_events(
@@ -1810,7 +1853,8 @@ class GatewayDatabase:
                 f"""
                 SELECT alert_event_id, rule_id, rule_name, event_id, device_id,
                        top_label, top_confidence, top_species, webhook_url,
-                       delivery_status, webhook_response, fired_at
+                       delivery_status, webhook_response, fired_at,
+                       severity, suppressed_count
                 FROM alert_events
                 {where}
                 ORDER BY fired_at DESC
