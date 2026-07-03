@@ -314,6 +314,39 @@ def get_inference_results(context: ToolContext, event_id: str) -> dict[str, Any]
     return {"ok": True, "event_id": event_id, "result": result}
 
 
+def get_activity_report(
+    context: ToolContext,
+    limit: int = 5000,
+    species: str | None = None,
+    min_confidence: float = 0.0,
+    tz_offset_hours: int = 0,
+) -> dict[str, Any]:
+    """Per-subject hour-of-day activity + diel pattern over recent detections.
+
+    Answers "when is each species active here?" — returns, per subject, a 24-bucket
+    hour-of-day histogram, total count, peak hour, first/last seen, and a diel-pattern
+    label (nocturnal / diurnal / crepuscular / cathemeral).
+
+    Arguments
+    ---------
+    limit:           Max detections to roll up (1–50000, default 5000).
+    species:         Substring match on species name (e.g. "deer").
+    min_confidence:  Minimum top_confidence to include (default 0.0).
+    tz_offset_hours: Shift UTC timestamps to local time for hour-of-day bucketing
+                     (e.g. -8 for US Pacific).
+    """
+    from clawcam_gateway.analytics.activity import build_activity_report
+
+    safe_limit = max(1, min(int(limit), 50_000))
+    detections = context.db.list_inference_results(
+        limit=safe_limit, species=species, min_confidence=float(min_confidence),
+    )
+    return {
+        "ok": True,
+        "report": build_activity_report(detections, tz_offset_hours=int(tz_offset_hours)),
+    }
+
+
 def list_species_detections(
     context: ToolContext,
     limit: int = 25,

@@ -225,8 +225,10 @@ wildlife operator actually asks ("are the coyotes nocturnal at this site?").
 3. **Tests**: `tests/gateway/test_activity_report.py` (8/8, import-isolated) — counts /
    peak / ranking, each diel pattern, the timezone-offset shift, and the `top_label`
    fallback + first/last-seen.
-4. **Follow-up**: expose as an MCP tool (`get_activity_report`, auto-approved) so the
-   brain can ask "when are deer active here?" directly.
+4. **MCP tool** `get_activity_report` (auto-approved) — wired through the whole
+   tool-catalog SSOT: the tool fn (`tools/clawcam_tools.py`), `TOOL_DEFINITIONS` +
+   dispatch (`mcp_server/`), and the brain adapter's `auto_approve` set — so the brain
+   (Oh-Ben-Claw) can ask "when are deer active here?" directly over MCP, no approval.
 
 ## Phase 5 Complete — Data Export, Cloud Retry, Dashboard Enrichment
 

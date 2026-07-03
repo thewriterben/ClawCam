@@ -127,6 +127,7 @@ class ToolPolicy:
         "list_pending_commands",
         "list_capabilities",
         "get_inference_results",
+        "get_activity_report",
         "list_species_detections",
         "list_firmware_builds",
         "get_cloud_sync_status",

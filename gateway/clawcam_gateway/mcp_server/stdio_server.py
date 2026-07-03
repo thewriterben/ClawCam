@@ -147,6 +147,20 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_activity_report",
+        "description": "Per-subject hour-of-day activity and diel pattern (nocturnal/diurnal/crepuscular/cathemeral) over recent detections. Answers 'when are deer active here?'.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50000, "default": 5000},
+                "species": {"type": "string", "description": "Substring match on species name."},
+                "min_confidence": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.0},
+                "tz_offset_hours": {"type": "integer", "minimum": -12, "maximum": 14, "default": 0,
+                                    "description": "Shift UTC to local time for hour-of-day bucketing."},
+            },
+        },
+    },
+    {
         "name": "list_firmware_builds",
         "description": "List all firmware binaries uploaded to the gateway, with build_id, version, SHA256, and download URL.",
         "inputSchema": {"type": "object", "properties": {}},
