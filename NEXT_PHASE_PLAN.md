@@ -113,6 +113,37 @@ and run the same suite to confirm the flipped default.
 
 ---
 
+## Embodied integration (OBC-side, built)
+
+Beyond the MCP/approval contract above, OBC now consumes ClawCam as a full
+**bidirectional embodied subsystem** on its world-memory substrate (OBC `src/vision/`,
+config-gated, default off). Recorded here so the two repos stay in lockstep on what
+crosses the bridge.
+
+**Read (ClawCam → OBC):**
+- *Detections* → `vision.subject.{species}` facts + a rolling `vision.count.{subject}`
+  the OBC foresight layer trends (detection-rate prediction).
+- *`get_node_health`* (`poll_health`) → namespaced `clawcam.node.{id}` facts —
+  intentionally **not** merged into OBC's own robot power/comms suites (a camera is a
+  distinct body).
+- *`list_audio_classifications`* (`poll_audio`) → OBC audio suite as
+  `audio.clawcam:{node}` streams (a glassbreak becomes a safing-classifiable alarm).
+
+**React:** OBC authors vision-driven reflex rules (verified alert subject → escalate
+through Track 0) and foresight rules (rising sighting rate → escalate early).
+
+**Act (OBC → ClawCam):** an OBC reflex sink translates `clawcam/cmd/*` actions into
+ClawCam's gated write tools — `capture_now`, `set_device_state`, `create_alert_rule`
+— over the same MCP bridge, still passing ClawCam's approval model. **No ClawCam-side
+change was required**; these are exactly the tools the catalog SSOT already exposes.
+
+**Implication for ClawCam:** the tool catalog and approval model are now load-bearing
+for *closed-loop* control, not just operator reads. Keep `capture_now` /
+`set_device_state` / `create_alert_rule` argument shapes stable, or bump the catalog
+version and let the drift-guard + OBC `map_command` mapping catch it.
+
+---
+
 ## Verification status
 
 - **OBC (Rust):** approval scopes + plan-mode + funnel green on the maintainer's
