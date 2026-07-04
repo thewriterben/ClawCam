@@ -175,6 +175,21 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_site_report",
+        "description": "One combined site summary: activity (hour-of-day + diel), trends (rising/falling), and the alert digest, with a headline. Answers 'what's happening at this site?'.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50000, "default": 5000},
+                "min_confidence": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.0},
+                "tz_offset_hours": {"type": "integer", "minimum": -12, "maximum": 14, "default": 0,
+                                    "description": "Shift UTC to local time for day/hour bucketing."},
+                "digest_window_s": {"type": "integer", "minimum": 1, "default": 604800,
+                                    "description": "Trailing window (seconds) for the alert digest; default 7 days."},
+            },
+        },
+    },
+    {
         "name": "list_firmware_builds",
         "description": "List all firmware binaries uploaded to the gateway, with build_id, version, SHA256, and download URL.",
         "inputSchema": {"type": "object", "properties": {}},

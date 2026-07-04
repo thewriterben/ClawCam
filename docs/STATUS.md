@@ -236,6 +236,12 @@ wildlife operator actually asks ("are the coyotes nocturnal at this site?").
    sightings increasing here?". Exposed at `GET /api/v1/analytics/trends` and as the
    auto-approved MCP tool `get_trend_report`, wired through the same SSOT. Tests:
    `tests/gateway/test_trend_report.py` (6/6, import-isolated).
+6. **Site report** (`analytics/site.py`) — one operator-facing summary that composes
+   activity + trends + the alert digest into a single report with a `headline` (totals,
+   top subject, rising/falling species, busiest day, alert counts). Exposed at
+   `GET /api/v1/analytics/site` and as the auto-approved MCP tool `get_site_report`
+   (SSOT-wired), so the brain can ask "what's happening at this site?" in one call. Tests:
+   `tests/gateway/test_site_report.py` (3/3, import-isolated).
 
 ## Phase 5 Complete — Data Export, Cloud Retry, Dashboard Enrichment
 

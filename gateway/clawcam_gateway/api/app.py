@@ -1060,6 +1060,35 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             "report": build_trend_report(dets, tz_offset_hours=int(tz_offset_hours)),
         }
 
+    @app.get("/api/v1/analytics/site")
+    def site_report_endpoint(
+        limit: int = 5000,
+        min_confidence: float = 0.0,
+        tz_offset_hours: int = 0,
+        digest_window_s: int = 604800,  # 7 days
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Combined site summary — activity + trends + alert digest in one report."""
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+        from clawcam_gateway.analytics.site import build_site_report
+
+        safe_limit = max(1, min(int(limit), 50_000))
+        scope = _deployment_scope(auth)
+        dets = db.list_inference_results(
+            limit=safe_limit, min_confidence=min_confidence, deployment_id=scope,
+        )
+        window = max(1, int(digest_window_s))
+        since = (_dt.now(_tz.utc) - _td(seconds=window)).isoformat()
+        alerts = db.list_alert_events(limit=50_000, since=since, deployment_id=scope)
+        return {
+            "ok": True,
+            "report": build_site_report(
+                dets, alerts, tz_offset_hours=int(tz_offset_hours),
+                digest_window_label=f"{window}s",
+            ),
+        }
+
     # ── Data export (Phase 5) ────────────────────────────────────────────
 
     @app.get("/api/v1/export/events.csv")

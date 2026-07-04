@@ -375,6 +375,46 @@ def get_trend_report(
     }
 
 
+def get_site_report(
+    context: ToolContext,
+    limit: int = 5000,
+    min_confidence: float = 0.0,
+    tz_offset_hours: int = 0,
+    digest_window_s: int = 604800,
+) -> dict[str, Any]:
+    """One combined site summary — activity + trends + alert digest.
+
+    Answers "what's happening at this site?": a headline (totals, top subject,
+    rising/falling species, busiest day, alert counts) plus the full activity, trend, and
+    alert-digest sub-reports.
+
+    Arguments
+    ---------
+    limit:           Max detections to roll up (1–50000, default 5000).
+    min_confidence:  Minimum top_confidence to include (default 0.0).
+    tz_offset_hours: Shift UTC to local time for day/hour bucketing (e.g. -8).
+    digest_window_s: Trailing window for the alert digest (default 604800 = 7 days).
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from clawcam_gateway.analytics.site import build_site_report
+
+    safe_limit = max(1, min(int(limit), 50_000))
+    detections = context.db.list_inference_results(
+        limit=safe_limit, min_confidence=float(min_confidence),
+    )
+    window = max(1, int(digest_window_s))
+    since = (datetime.now(timezone.utc) - timedelta(seconds=window)).isoformat()
+    alert_events = context.db.list_alert_events(limit=50_000, since=since)
+    return {
+        "ok": True,
+        "report": build_site_report(
+            detections, alert_events, tz_offset_hours=int(tz_offset_hours),
+            digest_window_label=f"{window}s",
+        ),
+    }
+
+
 def list_species_detections(
     context: ToolContext,
     limit: int = 25,

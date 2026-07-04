@@ -5,6 +5,7 @@ in isolation and reused anywhere (REST, MCP tools, the brain adapter).
 """
 
 from .activity import build_activity_report
+from .site import build_site_report
 from .trends import build_trend_report
 
-__all__ = ["build_activity_report", "build_trend_report"]
+__all__ = ["build_activity_report", "build_site_report", "build_trend_report"]
