@@ -511,6 +511,40 @@ def get_comparison_report(
     }
 
 
+def get_fused_detections(
+    context: ToolContext,
+    event_id: str,
+    iou_threshold: float = 0.5,
+) -> dict[str, Any]:
+    """Fuse an event's detector-chain results into one consolidated detection set.
+
+    An event may have several ``inference_results`` rows — one per detector in the chain
+    (e.g. a localiser plus a species classifier). This reads them and fuses overlapping
+    boxes into single detections: localisation from the strongest box, the most specific
+    label, and species carried over from an overlapping classifier box. Read-only; does
+    not modify stored rows.
+
+    Arguments
+    ---------
+    event_id:      The capture event to fuse detections for.
+    iou_threshold: Overlap (0–1) at which two boxes are treated as the same subject.
+    """
+    from clawcam_gateway.inference.boxops import fuse_detection_groups
+
+    rows = context.db.list_inference_results_for_event(event_id)
+    if not rows:
+        return {"ok": False, "error": f"no inference results for event: {event_id}",
+                "event_id": event_id}
+    groups = [r.get("detections") or [] for r in rows]
+    fused = fuse_detection_groups(groups, iou_threshold=max(0.0, min(1.0, float(iou_threshold))))
+    return {
+        "ok": True,
+        "event_id": event_id,
+        "detectors": [r.get("model_name") for r in rows],
+        "fused": fused,
+    }
+
+
 def list_species_detections(
     context: ToolContext,
     limit: int = 25,

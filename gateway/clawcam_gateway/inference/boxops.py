@@ -115,3 +115,37 @@ def merge_results(
     merged = [_merge_cluster(c) for c in clusters]
     merged.sort(key=lambda d: d.confidence, reverse=True)
     return InferenceResult(model_name=model_name, model_version=model_version, detections=merged)
+
+
+def _detection_from_dict(d: dict) -> Detection:
+    """Rebuild a :class:`Detection` from a stored/serialised detection dict."""
+    bbox = d.get("bbox") or [0.0, 0.0, 0.0, 0.0]
+    return Detection(
+        label=str(d.get("label") or ""),
+        confidence=float(d.get("confidence") or 0.0),
+        bbox=[float(v) for v in bbox],
+        species=d.get("species"),
+    )
+
+
+def fuse_detection_groups(
+    groups: Iterable[Iterable[dict]],
+    iou_threshold: float = 0.5,
+) -> dict:
+    """Fuse groups of *serialised* detections (as stored per detector) into one result.
+
+    Each group is one detector's detection list — e.g. the ``detections`` arrays parsed
+    from an event's stored ``inference_results`` rows. Reconstructs :class:`Detection`
+    objects, runs :func:`merge_results`, and returns the fused result as a dict
+    (``detections`` + ``top_label`` / ``top_confidence`` / ``top_species``). Pure: the
+    caller supplies already-parsed dicts, so no database is touched here.
+    """
+    results = [
+        InferenceResult(
+            model_name="group",
+            model_version="1",
+            detections=[_detection_from_dict(d) for d in (group or [])],
+        )
+        for group in groups
+    ]
+    return merge_results(results, iou_threshold=iou_threshold).to_dict()

@@ -6,7 +6,12 @@ sandbox without touching the database layer.
 
 import pytest
 
-from clawcam_gateway.inference.boxops import iou, merge_results, nms
+from clawcam_gateway.inference.boxops import (
+    fuse_detection_groups,
+    iou,
+    merge_results,
+    nms,
+)
 from clawcam_gateway.inference.detector import Detection, InferenceResult
 
 
@@ -85,6 +90,26 @@ def test_merge_empty_results_is_empty():
     fused = merge_results([InferenceResult("m", "1", [])])
     assert fused.detections == []
     assert fused.top_label is None
+
+
+def test_fuse_detection_groups_from_stored_rows():
+    # Two detectors' stored detection lists (as parsed from inference_results rows).
+    megadetector = [{"label": "animal", "confidence": 0.92, "bbox": [0, 0, 0.5, 0.5], "species": None}]
+    classifier = [{"label": "bird", "confidence": 0.80, "bbox": [0.01, 0.0, 0.5, 0.5],
+                   "species": "American robin"}]
+    fused = fuse_detection_groups([megadetector, classifier], iou_threshold=0.5)
+    assert fused["top_label"] == "bird"
+    assert fused["top_species"] == "American robin"
+    assert fused["top_confidence"] == pytest.approx(0.92)
+    assert len(fused["detections"]) == 1
+
+
+def test_fuse_detection_groups_handles_empty_and_missing_fields():
+    fused = fuse_detection_groups([[], [{"label": "person", "confidence": 0.7, "bbox": [0, 0, 1, 1]}]])
+    assert fused["top_label"] == "person"
+    assert fused["top_species"] is None
+    # Fully empty input → empty fused result.
+    assert fuse_detection_groups([])["detections"] == []
 
 
 def test_merge_prefers_highest_confidence_species():

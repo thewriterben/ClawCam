@@ -215,6 +215,19 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_fused_detections",
+        "description": "Fuse an event's detector-chain results into one consolidated detection set: overlapping boxes from different detectors merge, with localisation from the strongest box, the most specific label, and species carried over from a classifier. Read-only. Use to answer 'what is actually in this capture?' when a chain of detectors ran.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "string", "description": "The capture event to fuse detections for."},
+                "iou_threshold": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5,
+                                  "description": "Overlap at which two boxes are treated as the same subject."},
+            },
+            "required": ["event_id"],
+        },
+    },
+    {
         "name": "list_firmware_builds",
         "description": "List all firmware binaries uploaded to the gateway, with build_id, version, SHA256, and download URL.",
         "inputSchema": {"type": "object", "properties": {}},
