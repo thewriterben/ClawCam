@@ -229,6 +229,13 @@ wildlife operator actually asks ("are the coyotes nocturnal at this site?").
    tool-catalog SSOT: the tool fn (`tools/clawcam_tools.py`), `TOOL_DEFINITIONS` +
    dispatch (`mcp_server/`), and the brain adapter's `auto_approve` set — so the brain
    (Oh-Ben-Claw) can ask "when are deer active here?" directly over MCP, no approval.
+5. **Trend report** (`analytics/trends.py`) — the day-over-day companion:
+   `build_trend_report()` buckets detections by calendar day and labels each subject
+   **rising / falling / steady** (mean daily rate of the earlier vs later half of its
+   active days), with a daily time series and busiest day. Answers "are the deer
+   sightings increasing here?". Exposed at `GET /api/v1/analytics/trends` and as the
+   auto-approved MCP tool `get_trend_report`, wired through the same SSOT. Tests:
+   `tests/gateway/test_trend_report.py` (6/6, import-isolated).
 
 ## Phase 5 Complete — Data Export, Cloud Retry, Dashboard Enrichment
 

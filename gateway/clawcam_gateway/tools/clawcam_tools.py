@@ -347,6 +347,34 @@ def get_activity_report(
     }
 
 
+def get_trend_report(
+    context: ToolContext,
+    limit: int = 5000,
+    species: str | None = None,
+    min_confidence: float = 0.0,
+    tz_offset_hours: int = 0,
+) -> dict[str, Any]:
+    """Day-over-day detection trends per subject (rising / falling / steady).
+
+    Answers "are sightings increasing here?" — returns, per subject, a total, a trend
+    label, the busiest day, first/last day, and a daily time series, plus the overall
+    daily totals.
+
+    Arguments mirror ``get_activity_report``: ``limit`` (1–50000), ``species`` substring,
+    ``min_confidence``, and ``tz_offset_hours`` (shift UTC to local before bucketing by day).
+    """
+    from clawcam_gateway.analytics.trends import build_trend_report
+
+    safe_limit = max(1, min(int(limit), 50_000))
+    detections = context.db.list_inference_results(
+        limit=safe_limit, species=species, min_confidence=float(min_confidence),
+    )
+    return {
+        "ok": True,
+        "report": build_trend_report(detections, tz_offset_hours=int(tz_offset_hours)),
+    }
+
+
 def list_species_detections(
     context: ToolContext,
     limit: int = 25,

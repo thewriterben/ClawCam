@@ -128,6 +128,7 @@ class ToolPolicy:
         "list_capabilities",
         "get_inference_results",
         "get_activity_report",
+        "get_trend_report",
         "list_species_detections",
         "list_firmware_builds",
         "get_cloud_sync_status",

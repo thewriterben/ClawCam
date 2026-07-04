@@ -1037,6 +1037,29 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             "report": build_activity_report(dets, tz_offset_hours=int(tz_offset_hours)),
         }
 
+    @app.get("/api/v1/analytics/trends")
+    def trend_report_endpoint(
+        limit: int = 5000,
+        species: str | None = None,
+        min_confidence: float = 0.0,
+        tz_offset_hours: int = 0,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Day-over-day detection trends per subject (rising / falling / steady)."""
+        from clawcam_gateway.analytics.trends import build_trend_report
+
+        safe_limit = max(1, min(int(limit), 50_000))
+        dets = db.list_inference_results(
+            limit=safe_limit,
+            species=species,
+            min_confidence=min_confidence,
+            deployment_id=_deployment_scope(auth),
+        )
+        return {
+            "ok": True,
+            "report": build_trend_report(dets, tz_offset_hours=int(tz_offset_hours)),
+        }
+
     # ── Data export (Phase 5) ────────────────────────────────────────────
 
     @app.get("/api/v1/export/events.csv")

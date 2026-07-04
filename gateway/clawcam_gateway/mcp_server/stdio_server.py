@@ -161,6 +161,20 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_trend_report",
+        "description": "Day-over-day detection trends per subject (rising/falling/steady) with a daily time series. Answers 'are deer sightings increasing here?'.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50000, "default": 5000},
+                "species": {"type": "string", "description": "Substring match on species name."},
+                "min_confidence": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.0},
+                "tz_offset_hours": {"type": "integer", "minimum": -12, "maximum": 14, "default": 0,
+                                    "description": "Shift UTC to local time before bucketing by calendar day."},
+            },
+        },
+    },
+    {
         "name": "list_firmware_builds",
         "description": "List all firmware binaries uploaded to the gateway, with build_id, version, SHA256, and download URL.",
         "inputSchema": {"type": "object", "properties": {}},
