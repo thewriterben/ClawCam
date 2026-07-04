@@ -133,6 +133,7 @@ class ToolPolicy:
         "get_diversity_report",
         "get_comparison_report",
         "get_encounter_report",
+        "get_calibration_report",
         "get_fused_detections",
         "get_review_queue",
         "list_species_detections",

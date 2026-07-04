@@ -229,6 +229,21 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_calibration_report",
+        "description": "Confidence calibration from human review: uses reviewed detections (verified/corrected = real, rejected = false positive) to check whether higher confidence means higher correctness, and recommends an auto-accept threshold meeting a target precision. Answers 'can I trust confidence >= X, and what should X be?'. Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50000, "default": 5000},
+                "buckets": {"type": "integer", "minimum": 1, "maximum": 100, "default": 10,
+                            "description": "Number of confidence bins for the calibration curve."},
+                "target_precision": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.9,
+                                     "description": "Desired precision for the recommended threshold."},
+                "deployment_id": {"type": "string", "description": "Restrict to one deployment (optional)."},
+            },
+        },
+    },
+    {
         "name": "get_review_queue",
         "description": "Rank unreviewed detections by how much they need a human look: borderline-confidence hits, confident boxes with no species ID, and configured rare species lead; confident identified detections sink. Read-only. Use to decide what to review first instead of going chronologically.",
         "inputSchema": {

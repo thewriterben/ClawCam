@@ -542,6 +542,39 @@ def get_encounter_report(
     return {"ok": True, "report": build_encounter_report(dets, gap_minutes=int(gap_minutes))}
 
 
+def get_calibration_report(
+    context: ToolContext,
+    limit: int = 5000,
+    buckets: int = 10,
+    target_precision: float = 0.9,
+    deployment_id: str | None = None,
+) -> dict[str, Any]:
+    """Confidence calibration from human review — is the model's confidence trustworthy?
+
+    Uses reviewed detections as ground truth (``verified``/``corrected`` = real hit,
+    ``rejected`` = false positive) to measure whether higher confidence means higher
+    correctness, and recommends an auto-accept threshold that meets a target precision.
+    Answers "can I trust confidence >= X, and what should X be?".
+
+    Arguments
+    ---------
+    limit:            Max detections to scan for reviewed ones (1–50000, default 5000).
+    buckets:          Number of confidence bins for the calibration curve (default 10).
+    target_precision: Desired precision for the recommended threshold (default 0.9).
+    deployment_id:    Restrict to one deployment (optional).
+    """
+    from clawcam_gateway.analytics.calibration import build_calibration_report
+
+    safe_limit = max(1, min(int(limit), 50_000))
+    rows = context.db.list_inference_results(limit=safe_limit, deployment_id=deployment_id)
+    return {
+        "ok": True,
+        "report": build_calibration_report(
+            rows, buckets=int(buckets), target_precision=float(target_precision),
+        ),
+    }
+
+
 def get_review_queue(
     context: ToolContext,
     limit: int = 50,

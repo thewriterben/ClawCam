@@ -1150,6 +1150,25 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         )
         return {"ok": True, "report": build_encounter_report(dets, gap_minutes=int(gap_minutes))}
 
+    @app.get("/api/v1/analytics/calibration")
+    def calibration_report_endpoint(
+        limit: int = 5000,
+        buckets: int = 10,
+        target_precision: float = 0.9,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Confidence calibration from human review + recommended accept threshold."""
+        from clawcam_gateway.analytics.calibration import build_calibration_report
+
+        safe_limit = max(1, min(int(limit), 50_000))
+        rows = db.list_inference_results(limit=safe_limit, deployment_id=_deployment_scope(auth))
+        return {
+            "ok": True,
+            "report": build_calibration_report(
+                rows, buckets=int(buckets), target_precision=float(target_precision),
+            ),
+        }
+
     # ── Data export (Phase 5) ────────────────────────────────────────────
 
     @app.get("/api/v1/export/events.csv")
