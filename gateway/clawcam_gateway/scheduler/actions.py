@@ -9,6 +9,7 @@ ACTION_ENABLE_RULE = "enable_rule"
 ACTION_DISABLE_RULE = "disable_rule"
 ACTION_WEBHOOK = "webhook"
 ACTION_ALERT_DIGEST = "alert_digest"
+ACTION_DAILY_SUMMARY = "daily_summary"
 
 ACTION_TYPES: tuple[str, ...] = (
     ACTION_SET_STATE,
@@ -17,6 +18,7 @@ ACTION_TYPES: tuple[str, ...] = (
     ACTION_DISABLE_RULE,
     ACTION_WEBHOOK,
     ACTION_ALERT_DIGEST,
+    ACTION_DAILY_SUMMARY,
 )
 
 

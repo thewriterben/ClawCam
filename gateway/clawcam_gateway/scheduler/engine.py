@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from clawcam_gateway.scheduler.actions import (
     ACTION_ALERT_DIGEST,
+    ACTION_DAILY_SUMMARY,
     ACTION_DISABLE_RULE,
     ACTION_ENABLE_RULE,
     ACTION_SET_DEPLOYMENT_STATE,
@@ -224,6 +225,8 @@ class ScheduleEngine:
                 return self._action_webhook(sched_id, payload)
             if action_type == ACTION_ALERT_DIGEST:
                 return self._action_alert_digest(sched_id, payload)
+            if action_type == ACTION_DAILY_SUMMARY:
+                return self._action_daily_summary(sched_id, payload)
             return ScheduleRunResult(
                 schedule_id=sched_id, status="failed", detail={},
                 error=f"unknown action_type: {action_type}",
@@ -320,5 +323,47 @@ class ScheduleEngine:
             detail={"url": url, "http_status": status_code,
                     "total_alerts": digest["total_alerts"],
                     "suppressed_total": digest["suppressed_total"]},
+            error=error,
+        )
+
+    def _action_daily_summary(self, sched_id: str, payload: dict[str, Any]) -> ScheduleRunResult:
+        """Build the day's ecology roll-up and POST it to a webhook.
+
+        Payload: ``url`` (required), ``report_date`` (optional ``YYYY-MM-DD``, default
+        today UTC), ``deployment_id`` (optional). Delivers the one-line
+        ``detection_summary`` plus the full one-day site report (activity + trends +
+        diversity + alert digest) — the same picture ``generate_daily_summary`` returns.
+        """
+        from clawcam_gateway.analytics import build_daily_site_section
+
+        url = payload.get("url")
+        if not url:
+            return ScheduleRunResult(sched_id, status="failed", detail=payload,
+                                     error="daily_summary action requires url")
+        report_date = payload.get("report_date") or datetime.now(timezone.utc).date().isoformat()
+        deployment_id = payload.get("deployment_id")
+
+        detections = [
+            row for row in self._db.list_inference_results(limit=5000, deployment_id=deployment_id)
+            if str(row.get("ran_at", "")).startswith(report_date)
+        ]
+        alert_events = [
+            row for row in self._db.list_alert_events(
+                limit=100_000, deployment_id=deployment_id, since=f"{report_date}T00:00:00")
+            if str(row.get("fired_at", "")).startswith(report_date)
+        ]
+        section = build_daily_site_section(detections, alert_events=alert_events)
+        body = {
+            "date": report_date,
+            "deployment_id": deployment_id,
+            "detection_summary": section["sentence"],
+            "site": section["report"],
+        }
+        success, status_code, error = self._deliver_webhook(url, body)
+        return ScheduleRunResult(
+            sched_id,
+            status="success" if success else "failed",
+            detail={"url": url, "http_status": status_code, "date": report_date,
+                    "total_detections": section["report"]["headline"]["total_detections"]},
             error=error,
         )

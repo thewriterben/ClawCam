@@ -256,6 +256,13 @@ wildlife operator actually asks ("are the coyotes nocturnal at this site?").
    N alert(s)") plus the full one-day `site` sub-report (activity + trends + diversity +
    alert digest, `"1d"` window). Pure builder tested:
    `tests/gateway/test_daily_site_section.py` (4/4, import-isolated).
+9. **Scheduled daily summary** (`scheduler` action `daily_summary`) — a new schedule
+   action (`ACTION_DAILY_SUMMARY`, validated by `is_valid_action`, creatable via
+   `create_schedule`) that builds the day's `build_daily_site_section` and POSTs
+   `{date, detection_summary, site}` to a webhook. Payload: `url` (required),
+   `report_date` (optional, default today UTC), `deployment_id` (optional). Mirrors the
+   `alert_digest` action; the whole "what happened today" picture now pushes on a cron.
+   Tested: `tests/gateway/test_daily_summary_action.py` (stub DB + stub webhook).
 
 ## Phase 5 Complete — Data Export, Cloud Retry, Dashboard Enrichment
 
