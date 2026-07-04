@@ -249,6 +249,13 @@ wildlife operator actually asks ("are the coyotes nocturnal at this site?").
    `GET /api/v1/analytics/diversity` and the auto-approved MCP tool `get_diversity_report`
    (SSOT-wired), and folded into the site report. Tests:
    `tests/gateway/test_diversity_report.py` (5/5, import-isolated).
+8. **Daily summary → ecology** (`analytics/daily.py`, `build_daily_site_section`) —
+   `generate_daily_summary` now carries the day's ecology picture alongside its event
+   counts: it fetches the day's detections + fired alerts and attaches a one-line
+   `detection_summary` sentence ("N detections across K subject(s), led by X; rising: Y;
+   N alert(s)") plus the full one-day `site` sub-report (activity + trends + diversity +
+   alert digest, `"1d"` window). Pure builder tested:
+   `tests/gateway/test_daily_site_section.py` (4/4, import-isolated).
 
 ## Phase 5 Complete — Data Export, Cloud Retry, Dashboard Enrichment
 

@@ -82,6 +82,26 @@ def generate_daily_summary(
         for classification in event.get("classifications", []):
             label_counts[classification.get("label", "unknown")] += 1
 
+    # Fold in the day's ecology roll-up (activity + trends + diversity + alert digest).
+    from clawcam_gateway.analytics import build_daily_site_section
+
+    day_start = f"{report_date}T00:00:00"
+    detections = [
+        row
+        for row in context.db.list_inference_results(
+            limit=5000, deployment_id=deployment_id
+        )
+        if str(row.get("ran_at", "")).startswith(report_date)
+    ]
+    alert_events = [
+        row
+        for row in context.db.list_alert_events(
+            limit=5000, deployment_id=deployment_id, since=day_start
+        )
+        if str(row.get("fired_at", "")).startswith(report_date)
+    ]
+    site_section = build_daily_site_section(detections, alert_events=alert_events)
+
     return {
         "ok": True,
         "date": report_date,
@@ -90,6 +110,8 @@ def generate_daily_summary(
         "event_counts": dict(event_counts),
         "label_counts": dict(label_counts),
         "summary": _summary_sentence(len(events), event_counts, label_counts),
+        "detection_summary": site_section["sentence"],
+        "site": site_section["report"],
     }
 
 
