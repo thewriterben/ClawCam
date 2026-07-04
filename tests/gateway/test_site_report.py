@@ -43,10 +43,12 @@ def test_site_report_headline_and_composition():
     assert h["busiest_day"] == "2026-05-14"     # two detections that day
     assert h["total_alerts"] == 1
     assert h["alerts_suppressed"] == 3
+    assert h["richness"] == 2
 
     # The composed sub-reports carry through.
     assert r["activity"]["species"][0]["subject"] == "deer"
     assert r["trends"]["days_span"] == 3
+    assert r["diversity"]["richness"] == 2
     assert r["alerts"]["window"] == "7d"
 
 
