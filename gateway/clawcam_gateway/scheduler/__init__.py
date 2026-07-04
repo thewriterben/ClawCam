@@ -23,6 +23,8 @@ with mock timestamps so they don't depend on wall-clock progression.
 
 from clawcam_gateway.scheduler.engine import ScheduleEngine, ScheduleRunResult
 from clawcam_gateway.scheduler.actions import (
+    ACTION_ALERT_DIGEST,
+    ACTION_DAILY_SUMMARY,
     ACTION_DISABLE_RULE,
     ACTION_ENABLE_RULE,
     ACTION_SET_DEPLOYMENT_STATE,
@@ -35,6 +37,8 @@ from clawcam_gateway.scheduler.actions import (
 __all__ = [
     "ScheduleEngine",
     "ScheduleRunResult",
+    "ACTION_ALERT_DIGEST",
+    "ACTION_DAILY_SUMMARY",
     "ACTION_DISABLE_RULE",
     "ACTION_ENABLE_RULE",
     "ACTION_SET_DEPLOYMENT_STATE",

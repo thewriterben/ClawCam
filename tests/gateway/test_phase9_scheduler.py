@@ -40,6 +40,8 @@ from clawcam_gateway.mcp_server.stdio_server import TOOL_DEFINITIONS
 from clawcam_gateway.mcp_server.tool_dispatch import dispatch_tool
 from clawcam_gateway.profiles import STATE_ARMED, STATE_AWAY, STATE_NORMAL
 from clawcam_gateway.scheduler import (
+    ACTION_ALERT_DIGEST,
+    ACTION_DAILY_SUMMARY,
     ACTION_DISABLE_RULE,
     ACTION_ENABLE_RULE,
     ACTION_SET_DEPLOYMENT_STATE,
@@ -118,6 +120,8 @@ class TestActionVocabulary:
             ACTION_ENABLE_RULE,
             ACTION_DISABLE_RULE,
             ACTION_WEBHOOK,
+            ACTION_ALERT_DIGEST,
+            ACTION_DAILY_SUMMARY,
         }
 
     def test_is_valid_action(self):
