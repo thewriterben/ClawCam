@@ -229,6 +229,22 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_review_queue",
+        "description": "Rank unreviewed detections by how much they need a human look: borderline-confidence hits, confident boxes with no species ID, and configured rare species lead; confident identified detections sink. Read-only. Use to decide what to review first instead of going chronologically.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 50},
+                "low_conf": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.4,
+                             "description": "Below this confidence a detection is treated as likely noise."},
+                "high_conf": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.75,
+                              "description": "At/above this a detection is confident; the band between is the review zone."},
+                "rare_species": {"type": "array", "items": {"type": "string"},
+                                 "description": "Species names to always bump up for confirmation."},
+            },
+        },
+    },
+    {
         "name": "get_fused_detections",
         "description": "Fuse an event's detector-chain results into one consolidated detection set: overlapping boxes from different detectors merge, with localisation from the strongest box, the most specific label, and species carried over from a classifier. Read-only. Use to answer 'what is actually in this capture?' when a chain of detectors ran.",
         "inputSchema": {

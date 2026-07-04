@@ -542,6 +542,44 @@ def get_encounter_report(
     return {"ok": True, "report": build_encounter_report(dets, gap_minutes=int(gap_minutes))}
 
 
+def get_review_queue(
+    context: ToolContext,
+    limit: int = 50,
+    low_conf: float = 0.4,
+    high_conf: float = 0.75,
+    rare_species: list[str] | None = None,
+) -> dict[str, Any]:
+    """Rank unreviewed detections by how much they need a human look.
+
+    The triage queue surfaces detections still in the ``unreviewed`` state, ordered so the
+    ambiguous and the unusual lead: borderline-confidence hits, confident boxes with no
+    species ID, and any configured rare species. Confident, identified detections sink to
+    the bottom. Read-only; use to decide what to review first.
+
+    Arguments
+    ---------
+    limit:         Max unreviewed detections to rank (1–1000, default 50).
+    low_conf:      Below this confidence a detection is treated as likely noise.
+    high_conf:     At/above this confidence a detection is treated as a confident call;
+                   the band between the two is the ambiguous zone that most needs review.
+    rare_species:  Species names to always bump up for confirmation (optional).
+    """
+    from clawcam_gateway.inference.triage import build_review_queue
+    from clawcam_gateway.storage.database import REVIEW_STATE_UNREVIEWED
+
+    safe_limit = max(1, min(int(limit), 1000))
+    rows = context.db.list_inference_results_by_review_state(
+        REVIEW_STATE_UNREVIEWED, limit=safe_limit,
+    )
+    return {
+        "ok": True,
+        "queue": build_review_queue(
+            rows, low_conf=float(low_conf), high_conf=float(high_conf),
+            rare_species=rare_species or [],
+        ),
+    }
+
+
 def get_fused_detections(
     context: ToolContext,
     event_id: str,
