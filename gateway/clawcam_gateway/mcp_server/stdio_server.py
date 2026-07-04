@@ -201,6 +201,20 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_comparison_report",
+        "description": "Compare the last window_days of detections against the window before it: totals + percent change, newly-present vs vanished subjects, per-subject count deltas, richness delta, and whether the dominant subject changed. Answers 'how does this week compare to last?'.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "window_days": {"type": "integer", "minimum": 1, "maximum": 365, "default": 7,
+                                "description": "Length of each comparison window in days; current = trailing window_days, previous = the window_days before it."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50000, "default": 10000},
+                "min_confidence": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.0},
+                "deployment_id": {"type": "string", "description": "Restrict to one deployment (optional)."},
+            },
+        },
+    },
+    {
         "name": "list_firmware_builds",
         "description": "List all firmware binaries uploaded to the gateway, with build_id, version, SHA256, and download URL.",
         "inputSchema": {"type": "object", "properties": {}},

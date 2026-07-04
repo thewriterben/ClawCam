@@ -1104,6 +1104,36 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         )
         return {"ok": True, "report": build_diversity_report(dets)}
 
+    @app.get("/api/v1/analytics/comparison")
+    def comparison_report_endpoint(
+        window_days: int = 7,
+        limit: int = 10000,
+        min_confidence: float = 0.0,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Period-over-period comparison — last window_days vs the window before it."""
+        from datetime import datetime, timedelta, timezone
+
+        from clawcam_gateway.analytics.compare import build_comparison_report
+
+        safe_limit = max(1, min(int(limit), 50_000))
+        days = max(1, int(window_days))
+        now = datetime.now(timezone.utc)
+        cur_start = (now - timedelta(days=days)).isoformat()
+        prev_start = (now - timedelta(days=2 * days)).isoformat()
+        rows = db.list_inference_results(
+            limit=safe_limit, min_confidence=min_confidence, deployment_id=_deployment_scope(auth),
+        )
+        current = [r for r in rows if str(r.get("ran_at", "")) >= cur_start]
+        previous = [r for r in rows if prev_start <= str(r.get("ran_at", "")) < cur_start]
+        return {
+            "ok": True,
+            "report": build_comparison_report(
+                current, previous,
+                current_label=f"last {days}d", previous_label=f"prior {days}d",
+            ),
+        }
+
     # ── Data export (Phase 5) ────────────────────────────────────────────
 
     @app.get("/api/v1/export/events.csv")

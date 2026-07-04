@@ -459,6 +459,58 @@ def get_diversity_report(
     return {"ok": True, "report": build_diversity_report(detections)}
 
 
+def get_comparison_report(
+    context: ToolContext,
+    window_days: int = 7,
+    limit: int = 10000,
+    min_confidence: float = 0.0,
+    deployment_id: str | None = None,
+) -> dict[str, Any]:
+    """Compare the last ``window_days`` of detections against the window before it.
+
+    Answers "how does this week compare to last?" — returns totals + percent change,
+    subjects newly present (`new_subjects`) or gone (`dropped_subjects`), per-subject
+    count deltas sorted by magnitude, the richness delta, whether the dominant subject
+    changed, and a one-line headline.
+
+    Arguments
+    ---------
+    window_days:     Length of each comparison window in days (default 7). The current
+                     window is the trailing ``window_days``; the previous window is the
+                     ``window_days`` immediately before it.
+    limit:           Max detections to fetch across both windows (1–50000, default 10000).
+    min_confidence:  Minimum top_confidence to include (default 0.0).
+    deployment_id:   Restrict to one deployment (optional).
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from clawcam_gateway.analytics.compare import build_comparison_report
+
+    safe_limit = max(1, min(int(limit), 50_000))
+    days = max(1, int(window_days))
+    now = datetime.now(timezone.utc)
+    cur_start = (now - timedelta(days=days)).isoformat()
+    prev_start = (now - timedelta(days=2 * days)).isoformat()
+
+    rows = context.db.list_inference_results(
+        limit=safe_limit, min_confidence=float(min_confidence),
+        deployment_id=deployment_id,
+    )
+    current = [r for r in rows if str(r.get("ran_at", "")) >= cur_start]
+    previous = [
+        r for r in rows
+        if prev_start <= str(r.get("ran_at", "")) < cur_start
+    ]
+    return {
+        "ok": True,
+        "report": build_comparison_report(
+            current, previous,
+            current_label=f"last {days}d",
+            previous_label=f"prior {days}d",
+        ),
+    }
+
+
 def list_species_detections(
     context: ToolContext,
     limit: int = 25,

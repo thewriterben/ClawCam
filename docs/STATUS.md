@@ -263,6 +263,15 @@ wildlife operator actually asks ("are the coyotes nocturnal at this site?").
    `report_date` (optional, default today UTC), `deployment_id` (optional). Mirrors the
    `alert_digest` action; the whole "what happened today" picture now pushes on a cron.
    Tested: `tests/gateway/test_daily_summary_action.py` (stub DB + stub webhook).
+10. **Comparison report** (`analytics/compare.py`, `build_comparison_report`) —
+    period-over-period deltas: totals + percent change, newly-present (`new_subjects`) vs
+    vanished (`dropped_subjects`) subjects, per-subject count deltas sorted by magnitude,
+    richness delta, dominant-subject change, and a one-line headline. Answers "how does
+    this week compare to last?". Exposed at `GET /api/v1/analytics/comparison?window_days=`
+    and the auto-approved MCP tool `get_comparison_report` (SSOT-wired); both split the
+    fetched detections into a trailing current window and the equal window before it.
+    Pure builder tested: `tests/gateway/test_comparison_report.py` (6/6); tool window-split
+    tested: `tests/gateway/test_comparison_tool.py` (stub DB).
 
 ## Phase 5 Complete — Data Export, Cloud Retry, Dashboard Enrichment
 
