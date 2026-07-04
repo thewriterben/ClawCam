@@ -1134,6 +1134,22 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             ),
         }
 
+    @app.get("/api/v1/analytics/encounters")
+    def encounter_report_endpoint(
+        gap_minutes: int = 30,
+        limit: int = 5000,
+        min_confidence: float = 0.0,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Independent-encounter counts — lingering captures collapsed into visits."""
+        from clawcam_gateway.analytics.encounters import build_encounter_report
+
+        safe_limit = max(1, min(int(limit), 50_000))
+        dets = db.list_inference_results(
+            limit=safe_limit, min_confidence=min_confidence, deployment_id=_deployment_scope(auth),
+        )
+        return {"ok": True, "report": build_encounter_report(dets, gap_minutes=int(gap_minutes))}
+
     # ── Data export (Phase 5) ────────────────────────────────────────────
 
     @app.get("/api/v1/export/events.csv")

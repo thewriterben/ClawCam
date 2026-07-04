@@ -132,6 +132,7 @@ class ToolPolicy:
         "get_site_report",
         "get_diversity_report",
         "get_comparison_report",
+        "get_encounter_report",
         "get_fused_detections",
         "list_species_detections",
         "list_firmware_builds",

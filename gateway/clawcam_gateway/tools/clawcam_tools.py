@@ -511,6 +511,37 @@ def get_comparison_report(
     }
 
 
+def get_encounter_report(
+    context: ToolContext,
+    gap_minutes: int = 30,
+    limit: int = 5000,
+    min_confidence: float = 0.0,
+    deployment_id: str | None = None,
+) -> dict[str, Any]:
+    """Independent-encounter counts — collapse lingering captures into events.
+
+    A camera trap fires repeatedly while an animal is in frame, inflating raw detection
+    counts. This groups consecutive same-subject detections that are less than
+    ``gap_minutes`` apart into one encounter, and reports encounter vs raw counts per
+    subject (with a compression ratio) plus the encounter list. Use when you want the
+    honest "how many visits?" number rather than "how many frames?".
+
+    Arguments
+    ---------
+    gap_minutes:    Same-subject detections closer than this join one encounter (default 30).
+    limit:          Max detections to consider (1–50000, default 5000).
+    min_confidence: Minimum top_confidence to include (default 0.0).
+    deployment_id:  Restrict to one deployment (optional).
+    """
+    from clawcam_gateway.analytics.encounters import build_encounter_report
+
+    safe_limit = max(1, min(int(limit), 50_000))
+    dets = context.db.list_inference_results(
+        limit=safe_limit, min_confidence=float(min_confidence), deployment_id=deployment_id,
+    )
+    return {"ok": True, "report": build_encounter_report(dets, gap_minutes=int(gap_minutes))}
+
+
 def get_fused_detections(
     context: ToolContext,
     event_id: str,

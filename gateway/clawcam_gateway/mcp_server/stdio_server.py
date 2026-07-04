@@ -215,6 +215,20 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_encounter_report",
+        "description": "Collapse lingering camera-trap captures into independent encounters: consecutive same-subject detections closer than gap_minutes count as one visit. Returns encounter vs raw counts per subject (with a compression ratio) plus the encounter list. Use for the honest 'how many visits?' number instead of raw frame counts.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "gap_minutes": {"type": "integer", "minimum": 0, "default": 30,
+                                "description": "Same-subject detections closer than this join one encounter."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50000, "default": 5000},
+                "min_confidence": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.0},
+                "deployment_id": {"type": "string", "description": "Restrict to one deployment (optional)."},
+            },
+        },
+    },
+    {
         "name": "get_fused_detections",
         "description": "Fuse an event's detector-chain results into one consolidated detection set: overlapping boxes from different detectors merge, with localisation from the strongest box, the most specific label, and species carried over from a classifier. Read-only. Use to answer 'what is actually in this capture?' when a chain of detectors ran.",
         "inputSchema": {
