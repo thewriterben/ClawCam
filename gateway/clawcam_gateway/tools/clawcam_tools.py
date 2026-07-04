@@ -415,6 +415,28 @@ def get_site_report(
     }
 
 
+def get_diversity_report(
+    context: ToolContext,
+    limit: int = 5000,
+    min_confidence: float = 0.0,
+) -> dict[str, Any]:
+    """Species diversity metrics over recent detections.
+
+    Answers "is this a diverse site or a one-species show?" — returns richness (distinct
+    subjects), the Shannon index, Pielou evenness, Simpson dominance, the dominant
+    subject, and per-subject counts + proportions.
+
+    Arguments: ``limit`` (1–50000) and ``min_confidence`` (default 0.0).
+    """
+    from clawcam_gateway.analytics.diversity import build_diversity_report
+
+    safe_limit = max(1, min(int(limit), 50_000))
+    detections = context.db.list_inference_results(
+        limit=safe_limit, min_confidence=float(min_confidence),
+    )
+    return {"ok": True, "report": build_diversity_report(detections)}
+
+
 def list_species_detections(
     context: ToolContext,
     limit: int = 25,

@@ -130,6 +130,7 @@ class ToolPolicy:
         "get_activity_report",
         "get_trend_report",
         "get_site_report",
+        "get_diversity_report",
         "list_species_detections",
         "list_firmware_builds",
         "get_cloud_sync_status",

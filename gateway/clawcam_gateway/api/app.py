@@ -1089,6 +1089,21 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             ),
         }
 
+    @app.get("/api/v1/analytics/diversity")
+    def diversity_report_endpoint(
+        limit: int = 5000,
+        min_confidence: float = 0.0,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Species diversity metrics — richness, Shannon index, evenness, dominance."""
+        from clawcam_gateway.analytics.diversity import build_diversity_report
+
+        safe_limit = max(1, min(int(limit), 50_000))
+        dets = db.list_inference_results(
+            limit=safe_limit, min_confidence=min_confidence, deployment_id=_deployment_scope(auth),
+        )
+        return {"ok": True, "report": build_diversity_report(dets)}
+
     # ── Data export (Phase 5) ────────────────────────────────────────────
 
     @app.get("/api/v1/export/events.csv")

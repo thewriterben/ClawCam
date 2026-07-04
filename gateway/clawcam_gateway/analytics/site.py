@@ -16,6 +16,7 @@ from typing import Any
 from clawcam_gateway.alerts.digest import build_alert_digest
 
 from .activity import build_activity_report
+from .diversity import build_diversity_report
 from .trends import build_trend_report
 
 
@@ -40,6 +41,7 @@ def build_site_report(
     alert_events = alert_events or []
     activity = build_activity_report(detections, tz_offset_hours=tz_offset_hours)
     trends = build_trend_report(detections, tz_offset_hours=tz_offset_hours)
+    diversity = build_diversity_report(detections)
     alerts = build_alert_digest(alert_events, window_label=digest_window_label)
 
     top_subject = activity["species"][0]["subject"] if activity["species"] else None
@@ -59,6 +61,8 @@ def build_site_report(
         "rising_subjects": rising,
         "falling_subjects": falling,
         "busiest_day": busiest_day,
+        "richness": diversity["richness"],
+        "evenness": diversity["evenness"],
         "total_alerts": alerts["total_alerts"],
         "alerts_suppressed": alerts["suppressed_total"],
     }
@@ -68,5 +72,6 @@ def build_site_report(
         "headline": headline,
         "activity": activity,
         "trends": trends,
+        "diversity": diversity,
         "alerts": alerts,
     }

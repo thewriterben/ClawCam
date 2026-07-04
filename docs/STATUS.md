@@ -241,7 +241,14 @@ wildlife operator actually asks ("are the coyotes nocturnal at this site?").
    top subject, rising/falling species, busiest day, alert counts). Exposed at
    `GET /api/v1/analytics/site` and as the auto-approved MCP tool `get_site_report`
    (SSOT-wired), so the brain can ask "what's happening at this site?" in one call. Tests:
-   `tests/gateway/test_site_report.py` (3/3, import-isolated).
+   `tests/gateway/test_site_report.py` (3/3, import-isolated). Now also carries the
+   diversity metrics below (richness + evenness in the headline, full sub-report).
+7. **Diversity report** (`analytics/diversity.py`) — standard ecology metrics: richness
+   (distinct subjects), Shannon index, Pielou evenness, Simpson dominance, and the
+   dominant subject. Answers "is this a diverse site or a one-species show?". Exposed at
+   `GET /api/v1/analytics/diversity` and the auto-approved MCP tool `get_diversity_report`
+   (SSOT-wired), and folded into the site report. Tests:
+   `tests/gateway/test_diversity_report.py` (5/5, import-isolated).
 
 ## Phase 5 Complete — Data Export, Cloud Retry, Dashboard Enrichment
 

@@ -190,6 +190,17 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_diversity_report",
+        "description": "Species diversity metrics over recent detections: richness, Shannon index, evenness, and dominance. Answers 'is this a diverse site or a one-species show?'.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50000, "default": 5000},
+                "min_confidence": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.0},
+            },
+        },
+    },
+    {
         "name": "list_firmware_builds",
         "description": "List all firmware binaries uploaded to the gateway, with build_id, version, SHA256, and download URL.",
         "inputSchema": {"type": "object", "properties": {}},
