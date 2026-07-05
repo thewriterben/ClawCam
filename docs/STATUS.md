@@ -62,6 +62,14 @@ This document is the source of truth for current implementation maturity. ClawCa
 | Detector registry               | ✅ **Working**      | Name → factory mapping; lazy model loading; unavailable detectors skipped silently.           |
 | Multi-detector orchestration    | ✅ **Working**      | Per-profile/per-device detector chains; one event → multiple model results.                   |
 | Phase 12 orchestrator tests     | ✅ **Working**      | Registry resolve/skip, chain config, orchestrator runs, REST, tools, adapter policy.          |
+| Period comparison report        | ✅ **Working**      | `build_comparison_report`; `get_comparison_report` tool + `/api/v1/analytics` endpoint.       |
+| Box ops / chain fusion          | ✅ **Working**      | IoU + NMS + cross-detector fusion; `get_fused_detections` read-time MCP tool.                 |
+| Encounter sessionization        | ✅ **Working**      | Independent detection events → encounters; `get_encounter_report` tool; encounters-in-site.   |
+| Review triage                   | ✅ **Working**      | Review-priority scorer; `get_review_queue`, `set_review_state`, `list_observations_for_review`; review columns on `inference_results`. |
+| Confidence calibration          | ✅ **Working**      | Calibration bins from review verdicts; `get_calibration_report` tool.                         |
+| Daily anomaly detection         | ✅ **Working**      | Per-day z-score spikes/drops; `get_anomaly_report` tool; dashboard anomaly panel.             |
+| Profile alert templates         | ✅ **Working**      | `list_profile_alert_templates` / `apply_profile_alert_rules` seed per-profile rules.          |
+| Post-Phase-13 hardening         | ✅ **Working**      | 2026-07-04 audit fixes: see section below. Full suite green (845 passed).                     |
 
 Ground Rules:
 - No feature will be described as "Working" until verified with tests and reproducible steps.
@@ -399,6 +407,32 @@ All Phase 13 deliverables are code-complete and tested (see `NEXT_PHASE_PLAN.md`
 4. **Approval-model upgrade**: call/session/forever scopes + plan-mode argument bounds, wire-compatible with Oh-Ben-Claw.
 5. **CI gate widened**: `tests/integration` added to pytest testpaths; full gated suite green (678 passed).
 6. **Repo hygiene**: `.gitattributes` normalizes line endings to LF; simulator emits canonical `cap_clawcam_*` capabilities.
+
+## Post-Phase-13 Hardening — 2026-07-04 Audit
+
+A full-repo audit (`AUDIT_2026-07-04.md`) produced four fix rounds, all landed with the suite green (845 passed):
+
+1. **Security**: auth on `POST /api/v1/tools/{name}` (write scope for the 11 gated
+   tools) and on a dozen previously open endpoints; cross-deployment ownership
+   checks on zone/schedule mutations; API-key expiry parses timestamps and fails
+   closed.
+2. **Correctness**: image alert evaluation receives the originating `device_id`
+   (device/state/zone gating was silently disabled on the image path); mixed
+   SQLite/isoformat timestamp comparisons parsed via `timeutil.parse_ts`;
+   pending commands claimed atomically (`UPDATE…RETURNING`); cloud retries
+   transition the existing row; NULL-confidence rows no longer vanish from
+   listings.
+3. **Mock policy**: mock detectors/classifiers are opt-in (`CLAWCAM_ALLOW_MOCKS`);
+   removed from all default profile chains — a model-less production gateway
+   records nothing instead of fabricating detections. Evals/CI opt in explicitly.
+4. **Firmware pre-field fixes**: Kconfig-driven PIR pin (GPIO 13 collided with the
+   S3-EYE camera PCLK), Wi-Fi station bring-up, device registration before MQTT
+   publish, truthful MQTT publish results, SD-failure decoupled from upload, dual
+   OTA partition table. Structurally verified; hardware bench validation pending
+   (Phase 14).
+5. **Hygiene**: mocks-free dependency metadata (extras match imports), CI installs
+   the package, importing `api.app` no longer creates a DB (uvicorn `--factory`),
+   28 MB of legacy zips untracked, mypy runs against real dependency types.
 
 ## Next Milestone: Hardware Integration (Phase 14)
 

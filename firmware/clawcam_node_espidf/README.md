@@ -1,6 +1,6 @@
 # ClawCam Node ESP-IDF Firmware
 
-This directory will contain the next-generation ClawCam field node firmware. It is intentionally structured as ESP-IDF components so WildCAM camera-trap behavior can be migrated cleanly and ESP-Claw capability groups can be added without turning the firmware into a monolithic sketch.
+This directory contains the ClawCam field node firmware (working in simulation; hardware bench validation pending — see docs/STATUS.md). It is intentionally structured as ESP-IDF components so WildCAM camera-trap behavior can be migrated cleanly and ESP-Claw capability groups can be added without turning the firmware into a monolithic sketch.
 
 ## Component Plan
 
@@ -10,7 +10,12 @@ This directory will contain the next-generation ClawCam field node firmware. It 
 | `clawcam_motion` | PIR and other event-trigger sources. |
 | `clawcam_power` | Battery measurement, power profiles, deep sleep, solar/charger signals. |
 | `clawcam_storage` | Local media and JSON metadata storage. |
-| `clawcam_sensors` | Environmental, GPS, light, and optional external sensors. |
+| `clawcam_sensors` *(planned)* | Environmental, GPS, light, and optional external sensors. |
+| `clawcam_config` | NVS-backed deployment config; live patch via apply_config_patch. |
+| `clawcam_command_client` | Polls the gateway command queue and dispatches/acks commands. |
+| `clawcam_mqtt` | MQTT event publish + command receive with HTTP fallback. |
+| `clawcam_ota` | OTA firmware update (dual ota_0/ota_1 partitions). |
+| `clawcam_gateway_client` | HTTP registration/event upload client. |
 | `clawcam_events` | Event creation, queueing, serialization, and gateway publication. |
 | `clawcam_capabilities` | ESP-Claw-compatible wildlife capability group surface. |
 

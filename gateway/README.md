@@ -4,7 +4,7 @@ The ClawCam gateway is the offline-first field station for node ingest, validati
 
 ## Current Status
 
-This is an initial scaffold. It includes a FastAPI application, SQLite persistence, and JSON-schema validation hooks. It is intended to become the first working vertical slice for ClawCam.
+A working FastAPI + SQLite service (~60 routes): ingest and validation, inference orchestration, MQTT bridge, OTA, alerts, schedules, detection zones, audio, analytics, auth/multi-tenancy, and a 46-tool MCP surface. The table below covers only the Phase-1 core; the full REST surface is discoverable at `/docs` (OpenAPI) and the tool catalog at `GET /api/v1/tools` or `docs/standards/mcp-tools.md`. Status per feature: `docs/STATUS.md`.
 
 ## Run Locally
 
