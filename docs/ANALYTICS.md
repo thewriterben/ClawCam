@@ -66,11 +66,16 @@ encounters, distinct subjects, top subject, rising/falling, busiest day, richnes
 evenness, alert counts) plus the full `activity`, `trends`, `diversity`, `encounters`, and
 `alerts` sub-reports. It is the single "what's happening here?" answer.
 
-**Fused detections** (`get_fused_detections`) reads an event's detector-chain rows and
-merges overlapping boxes into one consolidated detection set — localisation from the
-strongest box, the most specific label, and species carried over from an overlapping
-classifier. The underlying `boxops` module also provides `iou`, `nms`, and `merge_results`
-for reuse. This is read-only fusion at query time; it does not modify stored rows.
+**Fused detections** (`get_fused_detections`) returns an event's consolidated detection
+set — localisation from the strongest box, the most specific label, and species carried
+over from an overlapping classifier. Since the orchestrator-fusion change, fusion happens
+**at inference time**: when a chain stores 2+ detector results, the orchestrator persists
+one `role='fused'` row and demotes the raw per-detector rows to `role='chain_member'`
+(replace-not-add — default listings, analytics, and the review queue see only the fused
+row, so a chain counts each subject once; the raw rows are preserved as field evidence in
+the per-event chain view). The tool returns the stored fused row when present
+(`stored: true`) and falls back to read-time fusion for older events. The underlying
+`boxops` module provides `iou`, `nms`, and `merge_results` for reuse.
 
 **Review queue** (`get_review_queue`) ranks unreviewed detections by attention-needed:
 borderline-confidence hits, confident boxes with no species ID, and configured rare

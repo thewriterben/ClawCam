@@ -63,7 +63,7 @@ This document is the source of truth for current implementation maturity. ClawCa
 | Multi-detector orchestration    | ✅ **Working**      | Per-profile/per-device detector chains; one event → multiple model results.                   |
 | Phase 12 orchestrator tests     | ✅ **Working**      | Registry resolve/skip, chain config, orchestrator runs, REST, tools, adapter policy.          |
 | Period comparison report        | ✅ **Working**      | `build_comparison_report`; `get_comparison_report` tool + `/api/v1/analytics` endpoint.       |
-| Box ops / chain fusion          | ✅ **Working**      | IoU + NMS + cross-detector fusion; `get_fused_detections` read-time MCP tool.                 |
+| Box ops / chain fusion          | ✅ **Working**      | IoU + NMS + cross-detector fusion; orchestrator stores a fused row (replace-not-add, `role` column); `get_fused_detections` MCP tool. |
 | Encounter sessionization        | ✅ **Working**      | Independent detection events → encounters; `get_encounter_report` tool; encounters-in-site.   |
 | Review triage                   | ✅ **Working**      | Review-priority scorer; `get_review_queue`, `set_review_state`, `list_observations_for_review`; review columns on `inference_results`. |
 | Confidence calibration          | ✅ **Working**      | Calibration bins from review verdicts; `get_calibration_report` tool.                         |

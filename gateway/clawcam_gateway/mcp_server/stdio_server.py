@@ -276,7 +276,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     },
     {
         "name": "get_fused_detections",
-        "description": "Fuse an event's detector-chain results into one consolidated detection set: overlapping boxes from different detectors merge, with localisation from the strongest box, the most specific label, and species carried over from a classifier. Read-only. Use to answer 'what is actually in this capture?' when a chain of detectors ran.",
+        "description": "Return an event's consolidated detection set: overlapping boxes from different detectors merged, with localisation from the strongest box, the most specific label, and species carried over from a classifier. Returns the fused row the orchestrator stored at inference time when present ('stored': true), else computes the fusion at read time. Read-only. Use to answer 'what is actually in this capture?' when a chain of detectors ran.",
         "inputSchema": {
             "type": "object",
             "properties": {

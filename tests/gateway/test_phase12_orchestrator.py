@@ -200,12 +200,17 @@ class TestOrchestratorRun:
         tmp_db.set_device_detector_chain("cam-p12", ["det_a", "det_b", "det_c"])
         orch = InferenceOrchestrator(db=tmp_db, registry=reg)
         summaries = orch.run("evt-orch-1", str(img), device_id="cam-p12")
-        assert len(summaries) == 3
+        # 3 detector summaries + 1 fused summary (2+ stored results fuse).
+        assert len(summaries) == 4
         assert all(s["stored"] is True for s in summaries)
+        assert summaries[-1]["detector"] == "fused"
+        assert summaries[-1]["members"] == ["det_a", "det_b", "det_c"]
 
         rows = tmp_db.list_inference_results_for_event("evt-orch-1")
-        # Each detector produced one row.
-        assert len(rows) == 3
+        # Each detector produced one row, plus the stored fused row last.
+        assert len(rows) == 4
+        assert [r["role"] for r in rows] == \
+            ["chain_member", "chain_member", "chain_member", "fused"]
 
     def test_unknown_detector_skipped(self, tmp_db: GatewayDatabase, tmp_path: Path):
         self._seed_event(tmp_db, event_id="evt-orch-skip")
@@ -235,8 +240,64 @@ class TestOrchestratorRun:
         orch = InferenceOrchestrator(db=tmp_db, registry=reg)
         orch.run("evt-orch-order", str(img), device_id="cam-p12")
         rows = tmp_db.list_inference_results_for_event("evt-orch-order")
-        # Both detectors produced a row, in execution order.
-        assert len(rows) == 2
+        # Both detectors produced a row (in execution order), then the fused row.
+        assert len(rows) == 3
+        assert rows[-1]["role"] == "fused"
+
+    def test_fusion_replaces_members_in_default_listings(
+            self, tmp_db: GatewayDatabase, tmp_path: Path):
+        """Replace-not-add: analytics/review listings see one fused row per chain."""
+        self._seed_event(tmp_db, event_id="evt-orch-fuse")
+        img = tmp_path / "x.jpg"
+        img.write_bytes(b"x")
+        reg = DetectorRegistry()
+        reg.register("det_x", lambda: MockDetector())
+        reg.register("det_y", lambda: MockDetector())
+        tmp_db.set_device_detector_chain("cam-p12", ["det_x", "det_y"])
+        orch = InferenceOrchestrator(db=tmp_db, registry=reg)
+        orch.run("evt-orch-fuse", str(img), device_id="cam-p12")
+
+        # The default listing (analytics feed) contains ONLY the fused row —
+        # chain members are excluded so subjects aren't double-counted.
+        listed = [r for r in tmp_db.list_inference_results(limit=100)
+                  if r["event_id"] == "evt-orch-fuse"]
+        assert len(listed) == 1
+        assert listed[0]["role"] == "fused"
+        assert listed[0]["model_name"] == "fused"
+
+        # The review-state queue path excludes members too.
+        queue = [r for r in tmp_db.list_inference_results_by_review_state("unreviewed", 100)
+                 if r["event_id"] == "evt-orch-fuse"]
+        assert len(queue) == 1
+        assert queue[0]["role"] == "fused"
+
+        # The legacy single-result view returns the fused row (alerts see it).
+        canonical = tmp_db.get_inference_result("evt-orch-fuse")
+        assert canonical is not None
+        assert canonical["role"] == "fused"
+
+        # Raw member rows are preserved as field evidence in the chain view.
+        chain_rows = tmp_db.list_inference_results_for_event("evt-orch-fuse")
+        assert [r["role"] for r in chain_rows] == ["chain_member", "chain_member", "fused"]
+
+    def test_single_stored_result_stays_single(self, tmp_db: GatewayDatabase,
+                                                 tmp_path: Path):
+        """One stored result → nothing to fuse; the row keeps role 'single'."""
+        self._seed_event(tmp_db, event_id="evt-orch-single")
+        img = tmp_path / "x.jpg"
+        img.write_bytes(b"x")
+        reg = DetectorRegistry()
+        reg.register("det_only", lambda: MockDetector())
+        tmp_db.set_device_detector_chain("cam-p12", ["det_only", "ghost_detector"])
+        orch = InferenceOrchestrator(db=tmp_db, registry=reg)
+        summaries = orch.run("evt-orch-single", str(img), device_id="cam-p12")
+        assert not any(s["detector"] == "fused" for s in summaries)
+        rows = tmp_db.list_inference_results_for_event("evt-orch-single")
+        assert len(rows) == 1
+        assert rows[0]["role"] == "single"
+        listed = [r for r in tmp_db.list_inference_results(limit=100)
+                  if r["event_id"] == "evt-orch-single"]
+        assert len(listed) == 1
 
 
 # ── DB column round-trip ────────────────────────────────────────────────────

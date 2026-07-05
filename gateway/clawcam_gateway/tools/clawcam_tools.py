@@ -661,29 +661,49 @@ def get_fused_detections(
 ) -> dict[str, Any]:
     """Fuse an event's detector-chain results into one consolidated detection set.
 
-    An event may have several ``inference_results`` rows — one per detector in the chain
-    (e.g. a localiser plus a species classifier). This reads them and fuses overlapping
-    boxes into single detections: localisation from the strongest box, the most specific
-    label, and species carried over from an overlapping classifier box. Read-only; does
-    not modify stored rows.
+    The orchestrator stores a fused row at inference time for multi-detector chains;
+    when one exists it is returned directly (``stored: true``). For older events (or
+    when no fused row exists) fusion is computed at read time: overlapping boxes merge
+    into single detections — localisation from the strongest box, the most specific
+    label, and species carried over from an overlapping classifier box. Read-only;
+    does not modify stored rows.
 
     Arguments
     ---------
     event_id:      The capture event to fuse detections for.
-    iou_threshold: Overlap (0–1) at which two boxes are treated as the same subject.
+    iou_threshold: Overlap (0–1) at which two boxes are treated as the same subject
+                   (applies to the read-time fallback; a stored fused row used the
+                   orchestrator's default).
     """
     from clawcam_gateway.inference.boxops import fuse_detection_groups
+    from clawcam_gateway.storage.database import RESULT_ROLE_FUSED
 
     rows = context.db.list_inference_results_for_event(event_id)
     if not rows:
         return {"ok": False, "error": f"no inference results for event: {event_id}",
                 "event_id": event_id}
-    groups = [r.get("detections") or [] for r in rows]
+    members = [r for r in rows if r.get("role") != RESULT_ROLE_FUSED]
+    stored_fused = next((r for r in rows if r.get("role") == RESULT_ROLE_FUSED), None)
+    if stored_fused is not None:
+        return {
+            "ok": True,
+            "event_id": event_id,
+            "stored": True,
+            "detectors": [r.get("model_name") for r in members],
+            "fused": {
+                "detections": stored_fused.get("detections") or [],
+                "top_label": stored_fused.get("top_label"),
+                "top_confidence": stored_fused.get("top_confidence"),
+                "top_species": stored_fused.get("top_species"),
+            },
+        }
+    groups = [r.get("detections") or [] for r in members]
     fused = fuse_detection_groups(groups, iou_threshold=max(0.0, min(1.0, float(iou_threshold))))
     return {
         "ok": True,
         "event_id": event_id,
-        "detectors": [r.get("model_name") for r in rows],
+        "stored": False,
+        "detectors": [r.get("model_name") for r in members],
         "fused": fused,
     }
 
@@ -1351,8 +1371,8 @@ def get_event_inference_chain(context: ToolContext, event_id: str) -> dict[str, 
     """Return the full multi-detector chain result for a single event.
 
     With Phase 12, each event can have multiple inference_results rows
-    (one per detector in the chain). This tool returns all of them
-    ordered by execution time.
+    (one per detector in the chain, plus the stored fused row when 2+
+    detectors ran). This tool returns all of them ordered by execution time.
     """
     results = context.db.list_inference_results_for_event(event_id)
     return {"ok": True, "event_id": event_id, "count": len(results), "results": results}

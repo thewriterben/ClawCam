@@ -16,6 +16,20 @@ REVIEW_STATES: frozenset[str] = frozenset(
     {"unreviewed", "verified", "corrected", "rejected", "needs_review"}
 )
 
+# Inference-result roles (Phase 12 chain fusion, replace-not-add):
+#   single       — the only result for its event (default; all legacy rows)
+#   chain_member — one detector's raw output, superseded by a stored fused row
+#   fused        — the consolidated cross-detector result for the event
+# Default listings (analytics, review queue, exports) exclude chain_member so a
+# fused chain counts each subject once; the raw member rows are preserved as
+# field evidence and stay visible via list_inference_results_for_event.
+RESULT_ROLE_SINGLE = "single"
+RESULT_ROLE_CHAIN_MEMBER = "chain_member"
+RESULT_ROLE_FUSED = "fused"
+RESULT_ROLES: frozenset[str] = frozenset(
+    {RESULT_ROLE_SINGLE, RESULT_ROLE_CHAIN_MEMBER, RESULT_ROLE_FUSED}
+)
+
 
 class GatewayDatabase:
     """Durable local database for offline-first ClawCam field gateways."""
@@ -386,6 +400,15 @@ class GatewayDatabase:
                 "CREATE INDEX IF NOT EXISTS idx_inference_review_state "
                 "ON inference_results(review_state)"
             )
+            # Chain fusion: role of each row (single / chain_member / fused).
+            self._add_column_if_missing(
+                conn, "inference_results", "role",
+                f"TEXT NOT NULL DEFAULT '{RESULT_ROLE_SINGLE}'",
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_inference_role "
+                "ON inference_results(role)"
+            )
 
     @staticmethod
     def _add_column_if_missing(conn, table: str, column: str, column_def: str) -> None:
@@ -666,24 +689,33 @@ class GatewayDatabase:
             return []
         return device.get("capabilities", [])
 
-    def save_inference_result(self, event_id: str, media_path: str, result: Any) -> None:
-        """Persist an InferenceResult (duck-typed) for an event."""
+    def save_inference_result(
+        self, event_id: str, media_path: str, result: Any,
+        role: str = RESULT_ROLE_SINGLE,
+    ) -> int:
+        """Persist an InferenceResult (duck-typed) for an event.
+
+        Returns the new row's ``result_id`` so the orchestrator can later
+        demote chain members once a fused row is stored.
+        """
         d = result.to_dict()
         review_state = d.get("review_state", REVIEW_STATE_UNREVIEWED)
         if review_state not in REVIEW_STATES:
             raise ValueError(f"invalid review_state: {review_state!r}")
+        if role not in RESULT_ROLES:
+            raise ValueError(f"invalid role: {role!r}; expected one of {sorted(RESULT_ROLES)}")
         with self.connect() as conn:
             ev = conn.execute(
                 "SELECT deployment_id FROM events WHERE event_id = ?", (event_id,)
             ).fetchone()
             deployment_id = ev["deployment_id"] if ev else "default"
-            conn.execute(
+            cur = conn.execute(
                 """
                 INSERT INTO inference_results
                     (event_id, media_path, model_name, model_version,
                      detections_json, top_label, top_confidence, top_species,
-                     review_state, deployment_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     review_state, deployment_id, role)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event_id,
@@ -696,8 +728,26 @@ class GatewayDatabase:
                     d.get("top_species"),
                     review_state,
                     deployment_id,
+                    role,
                 ),
             )
+            return int(cur.lastrowid or 0)
+
+    def demote_to_chain_members(self, result_ids: list[int]) -> int:
+        """Mark rows as chain members superseded by a stored fused row.
+
+        Only the ``role`` column changes — detections and review metadata are
+        untouched (raw model output is field evidence). Returns rows updated.
+        """
+        if not result_ids:
+            return 0
+        placeholders = ",".join("?" for _ in result_ids)
+        with self.connect() as conn:
+            cur = conn.execute(
+                f"UPDATE inference_results SET role = ? WHERE result_id IN ({placeholders})",
+                [RESULT_ROLE_CHAIN_MEMBER, *result_ids],
+            )
+        return cur.rowcount
 
     @staticmethod
     def _inference_dict(row: sqlite3.Row) -> dict[str, Any]:
@@ -718,22 +768,29 @@ class GatewayDatabase:
             "reviewed_at": row["reviewed_at"] if "reviewed_at" in keys else None,
             "reviewer": row["reviewer"] if "reviewer" in keys else None,
             "review_note": row["review_note"] if "review_note" in keys else None,
+            "role": row["role"] if "role" in keys else RESULT_ROLE_SINGLE,
         }
 
     def get_inference_result(self, event_id: str) -> dict[str, Any] | None:
-        """Return the most recent inference result for an event, or None."""
+        """Return the event's canonical inference result, or None.
+
+        A stored fused row wins outright (it is the consolidated chain result
+        — the row alerts and the legacy single-result view should see);
+        otherwise the most recent row, ``result_id`` as a deterministic
+        tiebreak since chain rows often share a ``ran_at`` second.
+        """
         with self.connect() as conn:
             row = conn.execute(
                 """
                 SELECT result_id, event_id, media_path, model_name, model_version,
                        detections_json, top_label, top_confidence, top_species, ran_at,
-                       review_state, reviewed_at, reviewer, review_note
+                       review_state, reviewed_at, reviewer, review_note, role
                 FROM inference_results
                 WHERE event_id = ?
-                ORDER BY ran_at DESC
+                ORDER BY (role = ?) DESC, ran_at DESC, result_id DESC
                 LIMIT 1
                 """,
-                (event_id,),
+                (event_id, RESULT_ROLE_FUSED),
             ).fetchone()
         if row is None:
             return None
@@ -749,7 +806,7 @@ class GatewayDatabase:
                 """
                 SELECT result_id, event_id, media_path, model_name, model_version,
                        detections_json, top_label, top_confidence, top_species, ran_at,
-                       review_state, reviewed_at, reviewer, review_note
+                       review_state, reviewed_at, reviewer, review_note, role
                 FROM inference_results WHERE event_id = ?
                 ORDER BY ran_at ASC, result_id ASC
                 """,
@@ -765,7 +822,13 @@ class GatewayDatabase:
         species: str | None = None,
         deployment_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """List recent inference results with optional filtering."""
+        """List recent inference results with optional filtering.
+
+        Chain-member rows are excluded: once a fused row is stored for an
+        event, it *replaces* its members in every default listing (analytics,
+        review queue, exports) so one chain counts each subject once. The raw
+        member rows remain via :meth:`list_inference_results_for_event`.
+        """
         # NULL top_confidence (legacy rows / detectors with no boxes) must not
         # vanish from unfiltered listings: include NULLs when no floor is set.
         if min_confidence > 0:
@@ -774,6 +837,8 @@ class GatewayDatabase:
         else:
             clauses = ["(top_confidence >= ? OR top_confidence IS NULL)"]
             params = [min_confidence]
+        clauses.append("role != ?")
+        params.append(RESULT_ROLE_CHAIN_MEMBER)
         if label:
             clauses.append("top_label = ?")
             params.append(label)
@@ -790,7 +855,7 @@ class GatewayDatabase:
                 f"""
                 SELECT result_id, event_id, media_path, model_name, model_version,
                        detections_json, top_label, top_confidence, top_species, ran_at,
-                       review_state, reviewed_at, reviewer, review_note
+                       review_state, reviewed_at, reviewer, review_note, role
                 FROM inference_results
                 WHERE {where}
                 ORDER BY ran_at DESC
@@ -838,7 +903,7 @@ class GatewayDatabase:
                 """
                 SELECT result_id, event_id, media_path, model_name, model_version,
                        detections_json, top_label, top_confidence, top_species, ran_at,
-                       review_state, reviewed_at, reviewer, review_note
+                       review_state, reviewed_at, reviewer, review_note, role
                 FROM inference_results WHERE result_id = ?
                 """,
                 (result_id,),
@@ -848,7 +913,10 @@ class GatewayDatabase:
     def list_inference_results_by_review_state(
         self, review_state: str, limit: int = 25
     ) -> list[dict[str, Any]]:
-        """List classifications in a given review state (e.g. triage queue)."""
+        """List classifications in a given review state (e.g. triage queue).
+
+        Chain-member rows are excluded — humans review the fused result.
+        """
         if review_state not in REVIEW_STATES:
             raise ValueError(f"invalid review_state: {review_state!r}")
         with self.connect() as conn:
@@ -856,13 +924,13 @@ class GatewayDatabase:
                 """
                 SELECT result_id, event_id, media_path, model_name, model_version,
                        detections_json, top_label, top_confidence, top_species, ran_at,
-                       review_state, reviewed_at, reviewer, review_note
+                       review_state, reviewed_at, reviewer, review_note, role
                 FROM inference_results
-                WHERE review_state = ?
+                WHERE review_state = ? AND role != ?
                 ORDER BY ran_at DESC
                 LIMIT ?
                 """,
-                (review_state, limit),
+                (review_state, RESULT_ROLE_CHAIN_MEMBER, limit),
             ).fetchall()
         return [self._inference_dict(row) for row in rows]
 
