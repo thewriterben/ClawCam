@@ -47,6 +47,12 @@ audio = [
 # tests/evals is the Phase 13 WS4 release gate: no release while evals regress.
 testpaths = ["../tests/gateway", "../tests/schemas", "../tests/evals", "../tests/integration", "../tests/firmware"]
 pythonpath = ["."]
+filterwarnings = [
+  # Starlette's TestClient flags its own httpx-backed import path as deprecated;
+  # it originates inside FastAPI/Starlette, not our code. Match by message so it works
+  # regardless of the exact warning subclass Starlette uses.
+  "ignore:Using .httpx. with .starlette.testclient. is deprecated",
+]
 
 [tool.ruff]
 line-length = 100

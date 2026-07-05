@@ -28,7 +28,9 @@ from clawcam_gateway.api.ops_dashboard import render_ops_dashboard
 from clawcam_gateway.auth import (
     AuthContext,
     SCOPE_ADMIN,
+    SCOPE_WRITE,
     SCOPES,
+    ScopeRequired,
     auth_response_payload,
     generate_api_key,
     hash_api_key,
@@ -103,6 +105,22 @@ def _check_device_access(db, auth: AuthContext, device_id: str) -> None:
     dep = db.deployment_for_device(device_id)
     if dep is not None and dep != scope:
         raise HTTPException(status_code=403, detail="forbidden: resource belongs to another deployment")
+
+
+def _check_resource_deployment(auth: AuthContext, resource_deployment: str | None) -> None:
+    """403 if a non-admin caller touches a resource in another deployment."""
+    scope = _deployment_scope(auth)
+    if scope is not None and resource_deployment is not None and resource_deployment != scope:
+        raise HTTPException(status_code=403, detail="forbidden: resource belongs to another deployment")
+
+
+def _resolve_target_deployment(auth: AuthContext, requested: str | None) -> str:
+    """Deployment a new resource lands in; non-admins may only use their own."""
+    if requested is None:
+        return auth.deployment_id
+    if _deployment_scope(auth) is not None and requested != auth.deployment_id:
+        raise HTTPException(status_code=403, detail="forbidden: cannot create resources in another deployment")
+    return requested
 
 
 def _check_event_access(db, auth: AuthContext, event_id: str) -> None:
@@ -324,10 +342,13 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         return {"ok": True, "zones": zones, "count": len(zones)}
 
     @app.get("/api/v1/zones/{zone_id}")
-    def get_zone_endpoint(zone_id: str) -> dict[str, Any]:
+    def get_zone_endpoint(
+        zone_id: str, auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
         zone = db.get_detection_zone(zone_id)
         if zone is None:
             raise HTTPException(status_code=404, detail=f"unknown zone: {zone_id}")
+        _check_resource_deployment(auth, zone.get("deployment_id"))
         return {"ok": True, "zone": zone}
 
     @app.post("/api/v1/zones")
@@ -356,7 +377,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         zone = {
             "zone_id": zone_id,
             "device_id": data["device_id"],
-            "deployment_id": data.get("deployment_id", auth.deployment_id),
+            "deployment_id": _resolve_target_deployment(auth, data.get("deployment_id")),
             "name": data["name"],
             "polygon": data["polygon"],
             "action": data["action"],
@@ -372,6 +393,10 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         auth: AuthContext = Depends(require_write),
     ) -> dict[str, Any]:
         from clawcam_gateway.zones import is_valid_polygon, is_valid_zone_action
+        existing = db.get_detection_zone(zone_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail=f"unknown zone: {zone_id}")
+        _check_resource_deployment(auth, existing.get("deployment_id"))
         updates = payload.data
         if "polygon" in updates and not is_valid_polygon(updates["polygon"]):
             raise HTTPException(status_code=400, detail="invalid polygon")
@@ -386,6 +411,9 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     def delete_zone_endpoint(
         zone_id: str, auth: AuthContext = Depends(require_write),
     ) -> dict[str, Any]:
+        existing = db.get_detection_zone(zone_id)
+        if existing is not None:
+            _check_resource_deployment(auth, existing.get("deployment_id"))
         ok = db.delete_detection_zone(zone_id)
         if not ok:
             raise HTTPException(status_code=404, detail=f"unknown zone: {zone_id}")
@@ -506,6 +534,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         label: str | None = None,
         species: str | None = None,
         min_confidence: float = 0.0,
+        auth: AuthContext = Depends(get_auth_context),
     ) -> dict[str, Any]:
         safe_limit = max(1, min(limit, 200))
         results = db.list_audio_classifications(
@@ -565,7 +594,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
         schedule_id = data.get("schedule_id") or f"sched-{_uuid_mod.uuid4().hex[:12]}"
-        deployment_id = data.get("deployment_id", auth.deployment_id)
+        deployment_id = _resolve_target_deployment(auth, data.get("deployment_id"))
         schedule = {
             "schedule_id": schedule_id,
             "deployment_id": deployment_id,
@@ -585,6 +614,10 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         schedule_id: str, payload: Payload,
         auth: AuthContext = Depends(require_write),
     ) -> dict[str, Any]:
+        existing = db.get_schedule(schedule_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail=f"unknown schedule: {schedule_id}")
+        _check_resource_deployment(auth, existing.get("deployment_id"))
         ok = db.update_schedule(schedule_id, payload.data)
         if not ok:
             raise HTTPException(status_code=404, detail=f"unknown schedule: {schedule_id}")
@@ -594,6 +627,9 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     def delete_schedule_endpoint(
         schedule_id: str, auth: AuthContext = Depends(require_write),
     ) -> dict[str, Any]:
+        existing = db.get_schedule(schedule_id)
+        if existing is not None:
+            _check_resource_deployment(auth, existing.get("deployment_id"))
         ok = db.delete_schedule(schedule_id)
         if not ok:
             raise HTTPException(status_code=404, detail=f"unknown schedule: {schedule_id}")
@@ -603,6 +639,9 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     def run_schedule_now_endpoint(
         schedule_id: str, auth: AuthContext = Depends(require_write),
     ) -> dict[str, Any]:
+        existing = db.get_schedule(schedule_id)
+        if existing is not None:
+            _check_resource_deployment(auth, existing.get("deployment_id"))
         result = schedule_engine.run_now(schedule_id)
         return {
             "ok": result.status == "success",
@@ -617,6 +656,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         schedule_id: str | None = None,
         status: str | None = None,
         limit: int = 100,
+        auth: AuthContext = Depends(get_auth_context),
     ) -> dict[str, Any]:
         safe_limit = max(1, min(limit, 500))
         runs = db.list_schedule_runs(schedule_id=schedule_id, status=status, limit=safe_limit)
@@ -718,12 +758,16 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         target_id: str | None = None,
         deployment_id: str | None = None,
         limit: int = 50,
+        auth: AuthContext = Depends(get_auth_context),
     ) -> dict[str, Any]:
         safe_limit = max(1, min(limit, 500))
+        scope_filter = deployment_id
+        if auth.scope != "admin":
+            scope_filter = auth.deployment_id
         transitions = db.list_state_transitions(
             target_kind=target_kind,
             target_id=target_id,
-            deployment_id=deployment_id,
+            deployment_id=scope_filter,
             limit=safe_limit,
         )
         return {"ok": True, "transitions": transitions, "count": len(transitions)}
@@ -780,8 +824,12 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     # ── Node command transport (Phase 2) ──────────────────────────────────
 
     @app.get("/api/v1/commands/{device_id}/pending")
-    def get_pending_commands(device_id: str, limit: int = 10) -> dict[str, Any]:
+    def get_pending_commands(
+        device_id: str, limit: int = 10,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
         """Return queued commands for a node. Called by the node on each wake cycle."""
+        _check_device_access(db, auth, device_id)
         if db.get_device(device_id) is None:
             raise HTTPException(status_code=404, detail=f"unknown device: {device_id}")
         safe_limit = max(1, min(limit, 50))
@@ -871,8 +919,11 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             )
         else:
             background_tasks.add_task(pipeline.run, event_id, str(dest))
-        # Evaluate alert rules after inference completes
-        background_tasks.add_task(alert_evaluator.evaluate, event_id, None)
+        # Evaluate alert rules after inference completes. The originating
+        # device_id must be passed so device-scoped rules, required_state
+        # gating, and detection-zone filtering all apply (they are skipped
+        # when device_id is None).
+        background_tasks.add_task(alert_evaluator.evaluate, event_id, originating_device_id)
         # Queue cloud upload alongside inference (noop when cloud is disabled)
         background_tasks.add_task(cloud_worker.queue_and_upload, dest, event_id)
         return {"ok": True, "event_id": event_id, "media_path": str(dest), "inference": "queued"}
@@ -911,6 +962,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     def cloud_upload_status(
         limit: int = 25,
         status: str | None = None,
+        auth: AuthContext = Depends(get_auth_context),
     ) -> dict[str, Any]:
         """Return cloud upload records with optional status filter."""
         safe_limit = max(1, min(limit, 100))
@@ -951,13 +1003,17 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         return {"ok": True, "rule": rule}
 
     @app.get("/api/v1/alert-rules")
-    def list_alert_rules_endpoint() -> dict[str, Any]:
-        """Return all configured alert rules."""
+    def list_alert_rules_endpoint(
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Return all configured alert rules (webhook URLs may embed secrets)."""
         rules = db.list_alert_rules()
         return {"ok": True, "rules": rules, "count": len(rules)}
 
     @app.get("/api/v1/alert-rules/{rule_id}")
-    def get_alert_rule(rule_id: str) -> dict[str, Any]:
+    def get_alert_rule(
+        rule_id: str, auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
         """Return a single alert rule by ID."""
         rule = db.get_alert_rule(rule_id)
         if rule is None:
@@ -1169,6 +1225,25 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             ),
         }
 
+    @app.get("/api/v1/analytics/anomalies")
+    def anomaly_report_endpoint(
+        limit: int = 5000,
+        z_threshold: float = 2.0,
+        tz_offset_hours: int = 0,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Daily detection-count anomalies — spikes and drops vs the site baseline."""
+        from clawcam_gateway.analytics.anomaly import build_anomaly_report
+
+        safe_limit = max(1, min(int(limit), 50_000))
+        dets = db.list_inference_results(limit=safe_limit, deployment_id=_deployment_scope(auth))
+        return {
+            "ok": True,
+            "report": build_anomaly_report(
+                dets, z_threshold=float(z_threshold), tz_offset_hours=int(tz_offset_hours),
+            ),
+        }
+
     # ── Data export (Phase 5) ────────────────────────────────────────────
 
     @app.get("/api/v1/export/events.csv")
@@ -1275,13 +1350,15 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         }
 
     @app.get("/api/v1/firmware")
-    def list_firmware() -> dict[str, Any]:
+    def list_firmware(auth: AuthContext = Depends(get_auth_context)) -> dict[str, Any]:
         """List all uploaded firmware builds."""
         builds = db.list_firmware_builds()
         return {"ok": True, "builds": builds, "count": len(builds)}
 
     @app.get("/api/v1/firmware/{build_id}")
-    def get_firmware_build(build_id: str) -> dict[str, Any]:
+    def get_firmware_build(
+        build_id: str, auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
         """Return metadata for a specific firmware build."""
         build = db.get_firmware_build(build_id)
         if build is None:
@@ -1289,7 +1366,9 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         return {"ok": True, "build": build}
 
     @app.get("/api/v1/firmware/{build_id}/download")
-    def download_firmware(build_id: str) -> FileResponse:
+    def download_firmware(
+        build_id: str, auth: AuthContext = Depends(get_auth_context),
+    ) -> FileResponse:
         """Serve the raw firmware binary for a node OTA download."""
         build = db.get_firmware_build(build_id)
         if build is None:
@@ -1315,7 +1394,19 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         return {"tools": tool_catalog()}
 
     @app.post("/api/v1/tools/{tool_name}")
-    def call_tool(tool_name: str, request: ToolRequest) -> dict[str, Any]:
+    def call_tool(
+        tool_name: str, request: ToolRequest,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        # Mutating (approval-gated) tools require write scope; reads require
+        # any authenticated context. Without this, an anonymous caller could
+        # invoke capture_now / apply_config_patch / queue_firmware_update etc.
+        from clawcam_gateway.mcp_server.stdio_server import APPROVAL_REQUIRED_TOOLS
+        if tool_name in APPROVAL_REQUIRED_TOOLS:
+            try:
+                auth.require(SCOPE_WRITE)
+            except ScopeRequired as exc:
+                raise HTTPException(status_code=403, detail=str(exc)) from exc
         result = dispatch_tool(
             tool_name, request.arguments,
             database_path=config.database_path,
@@ -1329,7 +1420,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     # ── Observability (Phase 13 WS5) ─────────────────────────────────────
 
     @app.get("/api/v1/metrics")
-    def metrics() -> dict[str, Any]:
+    def metrics(auth: AuthContext = Depends(get_auth_context)) -> dict[str, Any]:
         """Gateway counters + per-tool call statistics from the audit table."""
 
         tool_stats = db.tool_call_stats()
@@ -1349,17 +1440,23 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         }
 
     @app.get("/api/v1/tool-audit")
-    def tool_audit(limit: int = 100) -> dict[str, Any]:
+    def tool_audit(
+        limit: int = 100, auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
         """Most recent tool-call audit rows (caller, args hash, latency)."""
 
         return {"ok": True, "audit": db.list_tool_call_audit(limit=limit)}
 
     @app.get("/api/v1/dashboard")
-    def dashboard_data(limit: int = 25) -> dict[str, Any]:
+    def dashboard_data(
+        limit: int = 25, auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
         return _dashboard_payload(db, config, limit)
 
     @app.get("/dashboard", response_class=HTMLResponse)
-    def dashboard(limit: int = 25) -> HTMLResponse:
+    def dashboard(
+        limit: int = 25, auth: AuthContext = Depends(get_auth_context),
+    ) -> HTMLResponse:
         return HTMLResponse(render_dashboard(_dashboard_payload(db, config, limit)))
 
     @app.get("/ops", response_class=HTMLResponse)

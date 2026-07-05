@@ -16,9 +16,15 @@ ClawCam is being rebuilt as a transparent, testable wildlife monitoring platform
 
 ```bash
 cd gateway
-python -m pip install fastapi uvicorn pydantic pytest jsonschema httpx
-PYTHONPATH=gateway pytest -q ../tests/schemas ../tests/gateway
+python -m pip install fastapi uvicorn pydantic pytest jsonschema httpx \
+    python-multipart croniter pillow
+PYTHONPATH=".:../brain/oh-ben-claw-adapter" pytest -q ../tests
 ```
+
+Note: `python-multipart` is required at app-construction time (FastAPI raises
+on route registration without it), `croniter` powers the scheduler, and the
+adapter path on `PYTHONPATH` makes `tests/gateway/test_tool_catalog_ssot.py`
+importable instead of skipping.
 
 ## Pull Request Checklist
 

@@ -575,6 +575,39 @@ def get_calibration_report(
     }
 
 
+def get_anomaly_report(
+    context: ToolContext,
+    limit: int = 5000,
+    z_threshold: float = 2.0,
+    tz_offset_hours: int = 0,
+    deployment_id: str | None = None,
+) -> dict[str, Any]:
+    """Flag unusually busy or quiet days in the detection series.
+
+    Scores each day's detection count against the mean and standard deviation of the whole
+    series and flags days beyond ``z_threshold`` as spikes (surges) or drops (suspicious
+    quiet — a knocked camera, an obstruction). Complements the trend report: trends give
+    direction, this catches individual outlier days. Answers "was any day weird?".
+
+    Arguments
+    ---------
+    limit:           Max detections to scan (1–50000, default 5000).
+    z_threshold:     A day is anomalous when ``|z| >= z_threshold`` (default 2.0).
+    tz_offset_hours: Shift UTC to local time for day bucketing.
+    deployment_id:   Restrict to one deployment (optional).
+    """
+    from clawcam_gateway.analytics.anomaly import build_anomaly_report
+
+    safe_limit = max(1, min(int(limit), 50_000))
+    dets = context.db.list_inference_results(limit=safe_limit, deployment_id=deployment_id)
+    return {
+        "ok": True,
+        "report": build_anomaly_report(
+            dets, z_threshold=float(z_threshold), tz_offset_hours=int(tz_offset_hours),
+        ),
+    }
+
+
 def get_review_queue(
     context: ToolContext,
     limit: int = 50,

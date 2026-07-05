@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ClawCam — Detection Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --panel-2: #1c2230; --border: #2a3140;
+    --text: #e6edf3; --muted: #8b96a5; --accent: #6ea8fe;
+    --green: #3fb950; --amber: #d29922; --red: #f85149; --purple: #db61a2;
+    --shadow: 0 1px 3px rgba(0,0,0,.4);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  header .claw { color: var(--accent); }
+  .spacer { flex: 1; }
+  .conn { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  input, button, select {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 10px; font-size: 13px;
+  }
+  input::placeholder { color: var(--muted); }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #06101f; border-color: var(--accent); font-weight: 600; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: #6e7681; }
+  .dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot.err { background: var(--red); box-shadow: 0 0 6px var(--red); }
+  main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+  .banner {
+    display: none; margin-bottom: 16px; padding: 10px 14px; border-radius: 8px;
+    border: 1px solid var(--amber); background: rgba(210,153,34,.12); color: #f0d9a0;
+  }
+  .banner.show { display: block; }
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 22px; }
+  @media (max-width: 720px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; box-shadow: var(--shadow); }
+  .stat .num { font-size: 26px; font-weight: 700; line-height: 1; }
+  .stat .lbl { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; margin-top: 6px; }
+  .section-title { font-size: 13px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin: 26px 0 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; box-shadow: var(--shadow); }
+  .card .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .card .subject { font-weight: 700; font-size: 15px; }
+  .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; text-transform: capitalize; }
+  .pill.nocturnal { background: rgba(110,168,254,.15); color: var(--accent); }
+  .pill.diurnal { background: rgba(210,153,34,.15); color: var(--amber); }
+  .pill.crepuscular { background: rgba(219,97,162,.15); color: var(--purple); }
+  .pill.cathemeral { background: rgba(139,150,165,.18); color: var(--muted); }
+  .card .meta { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+  .card .meta b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .hist { display: flex; align-items: flex-end; gap: 1px; height: 34px; }
+  .hist .bar { flex: 1; background: var(--accent); min-height: 1px; border-radius: 1px 1px 0 0; opacity: .85; }
+  .hist .bar.peak { background: var(--purple); opacity: 1; }
+  .haxis { display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; margin-top: 2px; }
+  .days { display: flex; align-items: flex-end; gap: 2px; height: 90px; }
+  .days .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 6px; }
+  .days .dbar { width: 100%; background: var(--accent); min-height: 2px; border-radius: 2px 2px 0 0; opacity: .8; }
+  .days .dbar.spike { background: var(--amber); opacity: 1; box-shadow: 0 0 8px rgba(210,153,34,.5); }
+  .days .dbar.drop { background: var(--red); opacity: 1; box-shadow: 0 0 8px rgba(248,81,73,.5); }
+  .days .dlbl { color: var(--muted); font-size: 9px; margin-top: 3px; writing-mode: vertical-rl; transform: rotate(180deg); max-height: 42px; }
+  .anom-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .anom-tag { font-size: 12px; padding: 3px 9px; border-radius: 999px; }
+  .anom-tag.spike { background: rgba(210,153,34,.15); color: var(--amber); }
+  .anom-tag.drop { background: rgba(248,81,73,.15); color: var(--red); }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; box-shadow: var(--shadow); }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; }
+  .kv .k { color: var(--muted); }
+  .kv .v { text-align: right; font-variant-numeric: tabular-nums; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border); }
+  .chip.up { color: var(--green); border-color: rgba(63,185,80,.4); }
+  .chip.down { color: var(--red); border-color: rgba(248,81,73,.4); }
+  .cal-verdict { font-weight: 700; }
+  .cal-verdict.good { color: var(--green); }
+  .cal-verdict.bad { color: var(--amber); }
+  .big { font-size: 30px; font-weight: 700; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 720px) { .two { grid-template-columns: 1fr; } }
+  footer { color: var(--muted); font-size: 12px; text-align: center; padding: 18px; }
+  .empty { color: var(--muted); text-align: center; padding: 30px; border: 1px dashed var(--border); border-radius: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="connDot"></span>
+  <h1>Claw<span class="claw">Cam</span> · Detections</h1>
+  <div class="spacer"></div>
+  <div class="conn">
+    <input id="url" size="22" placeholder="http://127.0.0.1:8000" />
+    <input id="token" size="12" type="password" placeholder="token (opt)" />
+    <input id="tz" size="3" type="number" title="TZ offset hours" placeholder="tz" />
+    <select id="interval" title="Auto-refresh">
+      <option value="0">Manual</option>
+      <option value="15000">15s</option>
+      <option value="30000" selected>30s</option>
+      <option value="60000">60s</option>
+      <option value="300000">5m</option>
+    </select>
+    <button id="refresh" class="primary">Refresh</button>
+  </div>
+</header>
+
+<main>
+  <div class="banner" id="banner"></div>
+
+  <div class="stats">
+    <div class="stat"><div class="num" id="s-det">–</div><div class="lbl">Detections</div></div>
+    <div class="stat"><div class="num" id="s-sub">–</div><div class="lbl">Subjects</div></div>
+    <div class="stat"><div class="num" id="s-enc">–</div><div class="lbl">Encounters</div></div>
+    <div class="stat"><div class="num" id="s-rich">–</div><div class="lbl">Richness</div></div>
+    <div class="stat"><div class="num" id="s-even">–</div><div class="lbl">Evenness</div></div>
+  </div>
+
+  <div class="two">
+    <div class="panel">
+      <div class="section-title" style="margin-top:0">Trends</div>
+      <div id="trends"></div>
+    </div>
+    <div class="panel">
+      <div class="section-title" style="margin-top:0">Diversity &amp; calibration</div>
+      <div id="divcal"></div>
+    </div>
+  </div>
+
+  <div class="section-title">Daily volume &amp; anomalies</div>
+  <div class="panel" id="anomPanel">
+    <div id="anomMeta" class="meta" style="margin-bottom:10px"></div>
+    <div class="days" id="days"></div>
+    <div class="anom-list" id="anomList"></div>
+  </div>
+
+  <div class="section-title">Activity by subject <span id="tzlbl" style="text-transform:none"></span></div>
+  <div class="grid" id="activity"></div>
+  <div class="empty" id="empty" style="display:none">No detections yet.</div>
+</main>
+
+<footer id="foot">Set your gateway URL and hit Refresh.</footer>
+
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const LS = "clawcam.detection.dashboard";
+
+  const cfg = (() => { try { return JSON.parse(localStorage.getItem(LS)) || {}; } catch { return {}; } })();
+  $("url").value = cfg.url || "http://127.0.0.1:8000";
+  $("token").value = cfg.token || "";
+  $("tz").value = cfg.tz != null ? cfg.tz : 0;
+  if (cfg.interval != null) $("interval").value = cfg.interval;
+  function saveCfg() {
+    localStorage.setItem(LS, JSON.stringify({
+      url: $("url").value.trim(), token: $("token").value,
+      tz: $("tz").value, interval: $("interval").value,
+    }));
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  async function getJSON(path) {
+    const base = $("url").value.trim().replace(/\/+$/, "");
+    const headers = {};
+    const token = $("token").value;
+    if (token) headers["Authorization"] = "Bearer " + token;
+    const res = await fetch(base + path, { headers });
+    if (!res.ok) throw new Error("HTTP " + res.status + " on " + path);
+    return await res.json();
+  }
+
+  async function fetchAll() {
+    const tz = Number($("tz").value) || 0;
+    // The site report folds in encounters, so three calls cover the whole view.
+    const [site, cal, anom] = await Promise.all([
+      getJSON("/api/v1/analytics/site?limit=5000&tz_offset_hours=" + tz),
+      getJSON("/api/v1/analytics/calibration?limit=5000"),
+      getJSON("/api/v1/analytics/anomalies?limit=5000&tz_offset_hours=" + tz),
+    ]);
+    return {
+      site: site.report || site,
+      cal: cal.report || cal,
+      anom: anom.report || anom,
+    };
+  }
+
+  // ── Rendering ──────────────────────────────────────────────────────────
+  function num(v, d) { return (v === null || v === undefined) ? (d || "–") : v; }
+
+  function histogram(hourly, peak) {
+    const max = Math.max(1, ...hourly);
+    let bars = "";
+    for (let h = 0; h < 24; h++) {
+      const pct = Math.round((hourly[h] / max) * 100);
+      bars += '<div class="bar' + (h === peak ? " peak" : "") + '" style="height:' + pct + '%" ' +
+        'title="' + h + ':00 — ' + hourly[h] + '"></div>';
+    }
+    return '<div class="hist">' + bars + '</div>' +
+      '<div class="haxis"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div>';
+  }
+
+  function render(data) {
+    const s = data.site || {};
+    const head = s.headline || {};
+    const activity = s.activity || {};
+    const trends = s.trends || {};
+    const diversity = s.diversity || {};
+    const cal = data.cal || {};
+    const anom = data.anom || {};
+
+    $("s-det").textContent = num(head.total_detections, 0);
+    $("s-sub").textContent = num(head.distinct_subjects, 0);
+    $("s-enc").textContent = num(head.total_encounters ?? (s.encounters || {}).total_encounters, 0);
+    $("s-rich").textContent = num(head.richness ?? diversity.richness, 0);
+    $("s-even").textContent = (head.evenness ?? diversity.evenness ?? 0);
+
+    // Trends panel
+    const rising = trends.species ? trends.species.filter(x => x.trend === "rising").map(x => x.subject)
+      : (head.rising_subjects || []);
+    const falling = trends.species ? trends.species.filter(x => x.trend === "falling").map(x => x.subject)
+      : (head.falling_subjects || []);
+    let th = '<div class="kv">' +
+      '<span class="k">Days span</span><span class="v">' + num(trends.days_span ?? head.days_span, 0) + '</span>' +
+      '<span class="k">Busiest day</span><span class="v">' + esc(num(head.busiest_day)) + '</span>' +
+      '<span class="k">Top subject</span><span class="v">' + esc(num(head.top_subject)) + '</span>' +
+      '</div><div style="margin-top:10px"></div>';
+    th += chipRow("Rising", rising, "up") + chipRow("Falling", falling, "down");
+    $("trends").innerHTML = th;
+
+    // Diversity + calibration panel
+    const wc = cal.suggested_threshold;
+    const calGood = cal.well_calibrated;
+    let dc = '<div class="kv">' +
+      '<span class="k">Shannon index</span><span class="v">' + num(diversity.shannon_index) + '</span>' +
+      '<span class="k">Simpson dominance</span><span class="v">' + num(diversity.simpson_dominance) + '</span>' +
+      '<span class="k">Dominant</span><span class="v">' + esc(num(diversity.dominant_subject)) + '</span>' +
+      '</div>';
+    if (cal.reviewed) {
+      dc += '<div style="margin-top:12px" class="kv">' +
+        '<span class="k">Reviewed</span><span class="v">' + cal.reviewed + '</span>' +
+        '<span class="k">Overall precision</span><span class="v">' + num(cal.overall_precision) + '</span>' +
+        '<span class="k">Calibrated</span><span class="v cal-verdict ' + (calGood ? "good" : "bad") + '">' +
+          (calGood ? "yes" : "no") + '</span>' +
+        '</div>' +
+        '<div style="margin-top:10px;color:var(--muted);font-size:12px">Suggested accept threshold</div>' +
+        '<div class="big">' + (wc === null || wc === undefined ? "—" : wc) + '</div>';
+    } else {
+      dc += '<div style="margin-top:12px;color:var(--muted);font-size:12px">No reviewed detections yet — calibration unavailable.</div>';
+    }
+    $("divcal").innerHTML = dc;
+
+    // Daily volume & anomalies
+    renderAnomalies(anom);
+
+    // Activity cards
+    $("tzlbl").textContent = activity.tz_offset_hours ? "(UTC" + (activity.tz_offset_hours >= 0 ? "+" : "") + activity.tz_offset_hours + ")" : "(UTC)";
+    const species = activity.species || [];
+    const grid = $("activity");
+    grid.innerHTML = "";
+    $("empty").style.display = species.length ? "none" : "block";
+    for (const sp of species) {
+      const diel = String(sp.diel_pattern || "cathemeral");
+      const el = document.createElement("div");
+      el.className = "card";
+      el.innerHTML =
+        '<div class="top">' +
+          '<span class="subject">' + esc(sp.subject) + '</span>' +
+          '<span class="pill ' + diel + '">' + diel + '</span>' +
+        '</div>' +
+        '<div class="meta"><b>' + sp.count + '</b> detections · peak <b>' +
+          String(sp.peak_hour).padStart(2, "0") + ':00</b></div>' +
+        histogram(sp.hourly || new Array(24).fill(0), sp.peak_hour);
+      grid.appendChild(el);
+    }
+  }
+
+  function renderAnomalies(anom) {
+    const series = anom.series || [];
+    const meta = $("anomMeta");
+    if (!series.length) {
+      meta.textContent = "No daily data yet.";
+      $("days").innerHTML = "";
+      $("anomList").innerHTML = "";
+      return;
+    }
+    meta.innerHTML = "Mean <b>" + num(anom.mean) + "</b>/day · σ <b>" + num(anom.stdev) +
+      "</b> · <b>" + num(anom.anomalies, 0) + "</b> anomalous day(s) over " +
+      num(anom.days, 0) + " days (|z| ≥ " + num(anom.z_threshold) + ")";
+
+    const max = Math.max(1, ...series.map(s => s.count));
+    // Show at most the most recent ~45 days so bars stay readable.
+    const recent = series.slice(-45);
+    let bars = "";
+    for (const s of recent) {
+      const pct = Math.round((s.count / max) * 100);
+      const cls = s.kind === "spike" ? " spike" : s.kind === "drop" ? " drop" : "";
+      const short = s.date.slice(5); // MM-DD
+      bars += '<div class="col" title="' + s.date + ' — ' + s.count + ' (z=' + s.z + ')">' +
+        '<div class="dbar' + cls + '" style="height:' + pct + '%"></div>' +
+        '<div class="dlbl">' + short + '</div></div>';
+    }
+    $("days").innerHTML = bars;
+
+    const flagged = series.filter(s => s.anomaly);
+    $("anomList").innerHTML = flagged.map(s =>
+      '<span class="anom-tag ' + s.kind + '">' + esc(s.date) + ' · ' + s.kind +
+      ' (' + s.count + ', z=' + s.z + ')</span>').join("");
+  }
+
+  function chipRow(label, subjects, cls) {
+    if (!subjects || !subjects.length) return "";
+    const chips = subjects.map(x => '<span class="chip ' + cls + '">' + esc(x) + '</span>').join("");
+    return '<div style="margin-top:8px"><div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">' +
+      label + '</div><div class="chips">' + chips + '</div></div>';
+  }
+
+  // ── Loop ───────────────────────────────────────────────────────────────
+  function setConn(ok, msg) {
+    $("connDot").className = "dot " + (ok ? "ok" : "err");
+    const b = $("banner");
+    if (ok) { b.className = "banner"; }
+    else { b.className = "banner show"; b.textContent = msg; }
+  }
+
+  let timer = null;
+  async function tick() {
+    saveCfg();
+    try {
+      const data = await fetchAll();
+      render(data);
+      setConn(true, "");
+      $("foot").textContent = "Connected · updated " + new Date().toLocaleTimeString();
+    } catch (e) {
+      setConn(false, "Could not reach the gateway (" + e.message + "). Is the ClawCam gateway " +
+        "running at this URL, and does it allow CORS for this page's origin?");
+      $("foot").textContent = "Disconnected · last try " + new Date().toLocaleTimeString();
+    }
+  }
+  function schedule() {
+    if (timer) { clearInterval(timer); timer = null; }
+    const ms = Number($("interval").value) || 0;
+    if (ms > 0) timer = setInterval(tick, ms);
+  }
+
+  $("refresh").addEventListener("click", tick);
+  $("interval").addEventListener("change", () => { saveCfg(); schedule(); });
+  for (const id of ["url", "token", "tz"]) {
+    $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") tick(); });
+  }
+
+  tick();
+  schedule();
+})();
+</script>
+</body>
+</html>
