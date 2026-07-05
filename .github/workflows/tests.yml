@@ -77,3 +77,23 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/brain/oh-ben-claw-adapter
         run: pytest --tb=short
+
+  firmware-build:
+    # Informational until the firmware is bench-validated on hardware: the
+    # ESP-IDF sources compiled clean structurally but have never been built
+    # against a real toolchain, so this job reports rather than gates.
+    name: Firmware build (ESP-IDF, esp32s3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build clawcam_node_espidf
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.2
+          target: esp32s3
+          path: firmware/clawcam_node_espidf
+          command: idf.py -D SDKCONFIG_DEFAULTS=sdkconfig.defaults.esp32s3_eye build
