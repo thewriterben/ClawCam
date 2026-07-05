@@ -36,6 +36,24 @@
 #include "clawcam_power.h"
 #include "clawcam_storage.h"
 
+/* Optional Wi-Fi station bring-up — required for any gateway upload path. */
+#ifndef CONFIG_CLAWCAM_WIFI_ENABLED
+#define CONFIG_CLAWCAM_WIFI_ENABLED 0
+#endif
+#if CONFIG_CLAWCAM_WIFI_ENABLED && defined(__has_include)
+#  if __has_include("esp_wifi.h")
+#    include "esp_wifi.h"
+#    include "esp_event.h"
+#    include "esp_netif.h"
+#    include "nvs_flash.h"
+#    include "freertos/event_groups.h"
+#    define CLAWCAM_HAVE_WIFI 1
+#  endif
+#endif
+#ifndef CLAWCAM_HAVE_WIFI
+#define CLAWCAM_HAVE_WIFI 0
+#endif
+
 /* ── Kconfig defaults ───────────────────────────────────────────────────── */
 
 #ifndef CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT
@@ -56,7 +74,16 @@
 
 /* ── Field parameters ───────────────────────────────────────────────────── */
 
-#define CLAWCAM_PIR_GPIO               13
+/*
+ * PIR wake pin comes from Kconfig and defaults to -1 (disabled). The
+ * ESP32-S3-EYE has no built-in PIR, and its GPIO 13 is the camera PCLK
+ * pin — arming EXT0 there causes spurious wakes from the camera bus.
+ * Boards with a PIR set CONFIG_CLAWCAM_PIR_GPIO per their board profile.
+ */
+#ifndef CONFIG_CLAWCAM_PIR_GPIO
+#define CONFIG_CLAWCAM_PIR_GPIO        (-1)
+#endif
+#define CLAWCAM_PIR_GPIO               CONFIG_CLAWCAM_PIR_GPIO
 #define CLAWCAM_DEVICE_ID              "esp32-s3-eye-v2.2-node"
 #define CLAWCAM_BOARD_PROFILE          "esp32-s3-eye-v2.2"
 
@@ -90,6 +117,99 @@ static void get_iso8601_timestamp(char *buf, size_t len, const char **time_sourc
     }
 }
 
+/* ── Wi-Fi station bring-up ─────────────────────────────────────────────── */
+
+#if CLAWCAM_HAVE_WIFI
+
+#define CLAWCAM_WIFI_CONNECTED_BIT BIT0
+static EventGroupHandle_t s_wifi_events;
+
+static void wifi_event_handler(void *arg, esp_event_base_t base,
+                               int32_t event_id, void *event_data)
+{
+    (void)arg; (void)event_data;
+    if (base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        esp_wifi_connect();
+    } else if (base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        /* One reconnect attempt per wake cycle; deep sleep bounds retries. */
+        esp_wifi_connect();
+    } else if (base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        xEventGroupSetBits(s_wifi_events, CLAWCAM_WIFI_CONNECTED_BIT);
+    }
+}
+
+/*
+ * Connect to the configured AP. Returns true when an IP was obtained
+ * within CONFIG_CLAWCAM_WIFI_CONNECT_TIMEOUT_MS. Failure is non-fatal:
+ * the wake cycle continues offline and SD remains the source of truth.
+ */
+static bool wifi_connect(void)
+{
+    if (CONFIG_CLAWCAM_WIFI_SSID[0] == '\0') {
+        ESP_LOGW(TAG, "Wi-Fi enabled but CLAWCAM_WIFI_SSID is empty; staying offline");
+        return false;
+    }
+
+    s_wifi_events = xEventGroupCreate();
+
+    esp_err_t err = esp_netif_init();
+    if (err != ESP_OK) { ESP_LOGW(TAG, "esp_netif_init: %s", esp_err_to_name(err)); return false; }
+    err = esp_event_loop_create_default();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "event loop init: %s", esp_err_to_name(err));
+        return false;
+    }
+    esp_netif_create_default_wifi_sta();
+
+    wifi_init_config_t init_cfg = WIFI_INIT_CONFIG_DEFAULT();
+    err = esp_wifi_init(&init_cfg);
+    if (err != ESP_OK) { ESP_LOGW(TAG, "esp_wifi_init: %s", esp_err_to_name(err)); return false; }
+
+    esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL, NULL);
+    esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL, NULL);
+
+    wifi_config_t sta_cfg = { 0 };
+    snprintf((char *)sta_cfg.sta.ssid, sizeof(sta_cfg.sta.ssid), "%s", CONFIG_CLAWCAM_WIFI_SSID);
+    snprintf((char *)sta_cfg.sta.password, sizeof(sta_cfg.sta.password), "%s", CONFIG_CLAWCAM_WIFI_PASSWORD);
+
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
+    err = esp_wifi_start();
+    if (err != ESP_OK) { ESP_LOGW(TAG, "esp_wifi_start: %s", esp_err_to_name(err)); return false; }
+
+    EventBits_t bits = xEventGroupWaitBits(
+        s_wifi_events, CLAWCAM_WIFI_CONNECTED_BIT, pdFALSE, pdFALSE,
+        pdMS_TO_TICKS(CONFIG_CLAWCAM_WIFI_CONNECT_TIMEOUT_MS));
+    if (bits & CLAWCAM_WIFI_CONNECTED_BIT) {
+        ESP_LOGI(TAG, "Wi-Fi connected: ssid=%s", CONFIG_CLAWCAM_WIFI_SSID);
+        return true;
+    }
+    ESP_LOGW(TAG, "Wi-Fi connect timed out after %d ms; continuing offline",
+             CONFIG_CLAWCAM_WIFI_CONNECT_TIMEOUT_MS);
+    return false;
+}
+
+/* Cleanly stop Wi-Fi before deep sleep to avoid RF current draw. */
+static void wifi_stop(void)
+{
+    esp_wifi_stop();
+}
+
+#else /* !CLAWCAM_HAVE_WIFI */
+
+static bool __attribute__((unused)) wifi_connect(void)
+{
+#if CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED
+    ESP_LOGW(TAG, "gateway upload enabled but Wi-Fi is not (CONFIG_CLAWCAM_WIFI_ENABLED); "
+                  "all network calls will fail — SD remains source of truth");
+#endif
+    return false;
+}
+
+static void wifi_stop(void) {}
+
+#endif /* CLAWCAM_HAVE_WIFI */
+
 /* ── Component init ─────────────────────────────────────────────────────── */
 
 static void init_components(void)
@@ -122,6 +242,40 @@ static void init_components(void)
     ESP_ERROR_CHECK(clawcam_motion_init(&motion_config));
 }
 
+/* ── Device registration (HTTP, idempotent) ────────────────────────────── */
+
+#if CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED
+static esp_err_t register_device_http(void)
+{
+    clawcam_gateway_client_config_t gateway_config;
+    esp_err_t err = clawcam_gateway_client_default_config(&gateway_config);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    char now[32];
+    const char *time_source = "unknown";
+    get_iso8601_timestamp(now, sizeof(now), &time_source);
+
+    char device_json[768];
+    snprintf(device_json, sizeof(device_json),
+        "{\"device_id\":\"" CLAWCAM_DEVICE_ID "\","
+        "\"device_type\":\"node\","
+        "\"name\":\"ESP32-S3-EYE Field Node\","
+        "\"hardware\":{\"board\":\"esp32-s3-eye-v2.2\",\"mcu\":\"esp32-s3\",\"camera\":\"ov2640\",\"storage\":\"sd/fatfs\"},"
+        "\"firmware\":{\"name\":\"clawcam-node-espidf\",\"version\":\"0.1.0\",\"source\":\"field-firmware\"},"
+        "\"deployment_id\":\"%s\","
+        "\"capabilities\":[" CLAWCAM_ESP32_S3_EYE_CAPABILITIES "],"
+        "\"status\":\"active\","
+        "\"created_at\":\"%s\","
+        "\"last_seen_at\":\"%s\","
+        "\"metadata\":{\"firmware_generated\":true,\"time_source\":\"%s\"}}",
+        g_config.deployment_id, now, now, time_source);
+
+    return clawcam_gateway_client_register_device(&gateway_config, device_json);
+}
+#endif /* CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED */
+
 /* ── Capture persistence (shared by smoke-test and live capture) ─────────── */
 
 static void persist_capture(
@@ -144,11 +298,15 @@ static void persist_capture(
         .extension = "jpg",
     };
     char media_path[192];
+    bool media_persisted = true;
     esp_err_t err = clawcam_storage_save_media(&media, media_path, sizeof(media_path));
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "media not persisted (%s); event continues without SD artifact",
+        /* SD failure must not abort the event: the gateway upload path is
+         * independent of local persistence (full/absent card, mount error). */
+        ESP_LOGW(TAG, "media not persisted (%s); continuing to event JSON + upload",
                  esp_err_to_name(err));
-        return;
+        media_persisted = false;
+        snprintf(media_path, sizeof(media_path), "unpersisted://%s.jpg", media_id);
     }
 
     char metadata[512];
@@ -174,9 +332,11 @@ static void persist_capture(
              timestamp, time_source,
              CLAWCAM_BOARD_PROFILE);
 
-    err = clawcam_storage_save_metadata(media_path, metadata);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "metadata not persisted: %s", esp_err_to_name(err));
+    if (media_persisted) {
+        err = clawcam_storage_save_metadata(media_path, metadata);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "metadata not persisted: %s", esp_err_to_name(err));
+        }
     }
 
     const clawcam_event_capture_t event = {
@@ -205,41 +365,35 @@ static void persist_capture(
     char event_path[192];
     err = clawcam_storage_save_event_json(event_id, event_json, event_path, sizeof(event_path));
     if (err != ESP_OK) {
+        /* Non-fatal: upload below is the other copy of this event. */
         ESP_LOGW(TAG, "event artifact not persisted: %s", esp_err_to_name(err));
-        return;
+        snprintf(event_path, sizeof(event_path), "unpersisted://%s.json", event_id);
     }
 
 #if CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED
+    /* Register the device over HTTP BEFORE any event transport: the
+     * gateway's MQTT bridge drops events from unknown devices, so an
+     * MQTT-only "success" on a fresh gateway would silently lose data.
+     * Registration is an idempotent upsert. */
+    esp_err_t reg_err = register_device_http();
+    if (reg_err != ESP_OK) {
+        ESP_LOGW(TAG, "device registration failed (%s); continuing — SD is source of truth",
+                 esp_err_to_name(reg_err));
+    }
+
     /* Try MQTT first (real-time, also receives pending commands).
-     * Fall back to HTTP REST if MQTT is unavailable or times out. */
+     * Fall back to HTTP REST when MQTT is unavailable, times out, or the
+     * broker never acks the publish. */
     clawcam_mqtt_config_t mqtt_cfg;
     clawcam_mqtt_default_config(&mqtt_cfg, CLAWCAM_DEVICE_ID);
     esp_err_t mqtt_err = clawcam_mqtt_publish_event(&mqtt_cfg, event_json, NULL, &g_config);
     bool uploaded_via_mqtt = (mqtt_err == ESP_OK);
 
     if (!uploaded_via_mqtt) {
-        /* MQTT unavailable — fall back to HTTP REST */
         clawcam_gateway_client_config_t gateway_config;
-        ESP_ERROR_CHECK(clawcam_gateway_client_default_config(&gateway_config));
-        char device_json[768];
-        snprintf(device_json, sizeof(device_json),
-            "{\"device_id\":\"" CLAWCAM_DEVICE_ID "\","
-            "\"device_type\":\"node\","
-            "\"name\":\"ESP32-S3-EYE Field Node\","
-            "\"hardware\":{\"board\":\"esp32-s3-eye-v2.2\",\"mcu\":\"esp32-s3\",\"camera\":\"ov2640\",\"storage\":\"sd/fatfs\"},"
-            "\"firmware\":{\"name\":\"clawcam-node-espidf\",\"version\":\"0.1.0\",\"source\":\"field-firmware\"},"
-            "\"deployment_id\":\"%s\","
-            "\"capabilities\":[" CLAWCAM_ESP32_S3_EYE_CAPABILITIES "],"
-            "\"status\":\"active\","
-            "\"created_at\":\"1970-01-01T00:00:00Z\","
-            "\"last_seen_at\":\"1970-01-01T00:00:00Z\","
-            "\"metadata\":{\"firmware_generated\":true}}",
-            g_config.deployment_id);
-
-        esp_err_t reg_err = clawcam_gateway_client_register_device(&gateway_config, device_json);
-        if (reg_err != ESP_OK) {
-            ESP_LOGW(TAG, "HTTP device registration failed (%s); SD event remains source of truth",
-                     esp_err_to_name(reg_err));
+        esp_err_t gw_err = clawcam_gateway_client_default_config(&gateway_config);
+        if (gw_err != ESP_OK) {
+            ESP_LOGW(TAG, "gateway client config failed: %s", esp_err_to_name(gw_err));
         } else {
             esp_err_t up_err = clawcam_gateway_client_upload_event(&gateway_config, event_json);
             if (up_err != ESP_OK) {
@@ -337,8 +491,13 @@ static void run_capture_cycle(const char *trigger)
 
 static void enter_field_sleep(uint64_t sleep_seconds)
 {
+    wifi_stop();
+#if CONFIG_CLAWCAM_PIR_GPIO >= 0
     /* PIR EXT0 is the primary wake source; timer is the fallback */
     clawcam_power_configure_wake_on_motion(CLAWCAM_PIR_GPIO);
+#else
+    ESP_LOGI(TAG, "no PIR configured (CLAWCAM_PIR_GPIO=-1); timer wake only");
+#endif
     clawcam_power_enter_deep_sleep(sleep_seconds);
     /* never reached */
 }
@@ -379,6 +538,12 @@ void app_main(void)
              (unsigned long)g_config.low_battery_sleep_s);
 
     init_components();
+
+#if CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED
+    /* Bring up Wi-Fi before any capture so uploads and command polling can
+     * reach the gateway. Failure is non-fatal (offline wake cycle). */
+    wifi_connect();
+#endif
 
     /* Smoke test runs once on bench / first power-on to validate hardware */
     esp_sleep_wakeup_cause_t wake_cause = esp_sleep_get_wakeup_cause();

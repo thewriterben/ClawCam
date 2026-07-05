@@ -24,3 +24,8 @@ CONFIG_CLAWCAM_STORAGE_PERSIST_SMOKE_TEST_CAPTURE=y
 CONFIG_CLAWCAM_STORAGE_MAX_FILES=5
 # Keep formatting disabled by default to avoid destructive bench/field behavior.
 # CONFIG_CLAWCAM_STORAGE_FORMAT_IF_MOUNT_FAILED is not set
+
+# Dual OTA app slots — without these esp_ota_get_next_update_partition()
+# fails and queue_firmware_update commands can never be applied.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_clawcam_8mb.csv"

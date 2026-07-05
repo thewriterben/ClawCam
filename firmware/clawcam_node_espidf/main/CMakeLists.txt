@@ -13,4 +13,8 @@ idf_component_register(
         clawcam_ota
         clawcam_power
         clawcam_storage
+        esp_wifi
+        esp_netif
+        esp_event
+        nvs_flash
 )
