@@ -14,17 +14,34 @@ ClawCam is being rebuilt as a transparent, testable wildlife monitoring platform
 
 ## Development Setup
 
+Install the gateway package editable with dev extras — exactly what CI does
+(`.github/workflows`), so your environment can't drift from the gate:
+
 ```bash
-cd gateway
-python -m pip install fastapi uvicorn pydantic pytest jsonschema httpx \
-    python-multipart croniter pillow
-PYTHONPATH=".:../brain/oh-ben-claw-adapter" pytest -q ../tests
+python -m pip install -e "gateway/[dev,mqtt]"
 ```
 
-Note: `python-multipart` is required at app-construction time (FastAPI raises
-on route registration without it), `croniter` powers the scheduler, and the
-adapter path on `PYTHONPATH` makes `tests/gateway/test_tool_catalog_ssot.py`
-importable instead of skipping.
+Run the full gated suite from the **repo root** — `pytest.ini` supplies the
+test paths and puts `gateway/` and `brain/oh-ben-claw-adapter/` on the import
+path, so no environment variables are needed:
+
+```bash
+pytest
+```
+
+Equivalent CI-style invocation from `gateway/` (uses the `testpaths` in
+`gateway/pyproject.toml`, the same five suites), as shown in the README:
+
+```bash
+cd gateway && PYTHONPATH=$PWD:$PWD/../brain/oh-ben-claw-adapter pytest
+```
+
+All runtime deps (including `python-multipart`, required at app-construction
+time, and `croniter` for the scheduler) come from the package metadata in
+`gateway/pyproject.toml` — never hand-install a dep list. The adapter path
+makes `tests/gateway/test_tool_catalog_ssot.py` run instead of skipping.
+Optional model runtimes are extras: `pip install -e "gateway/[vision]"`
+(MegaDetector), `[ocr]`, `[faces]`, `[audio]`, `[cloud]`.
 
 ## Pull Request Checklist
 
