@@ -4,6 +4,10 @@ ClawCam separates raw device events from ecological observations and human-revie
 
 ## Core Entities
 
+This table is the *conceptual* model. Implementation status differs per entity
+(see the notes below the table — some entities are dedicated tables, some are
+columns on other tables, some are conceptual only).
+
 | Entity | Description | Typical Owner |
 |---|---|---|
 | `Project` | A monitoring project or deployment campaign. | Gateway/cloud |
@@ -15,6 +19,23 @@ ClawCam separates raw device events from ecological observations and human-revie
 | `Classification` | A model or human label with confidence, taxon, model version, and review state. | Gateway/brain/human reviewer |
 | `Telemetry` | Battery, storage, environment, radio, uptime, and error metrics. | Node/gateway |
 | `ReviewTask` | A workflow item requiring human verification, correction, or approval. | Gateway/brain |
+
+Implementation notes (honest status, matching the gateway schema in
+`gateway/clawcam_gateway/storage/database.py`):
+
+- **`Project` has no table.** The closest implemented concept is
+  `deployment_id`, a scoping column carried on devices, events, inference
+  results, alerts, health, and media. A dedicated projects table is a cloud
+  aspiration (`cloud/README.md` — cloud services are deliberately deferred).
+- **`ReviewTask` has no table.** Review is implemented as columns on
+  `inference_results` (`review_state`, `reviewed_at`, `reviewer`,
+  `review_note`) plus the `get_review_queue` priority ranking — a queue
+  computed at read time, not a stored workflow item.
+- **`Classification` maps to `inference_results` rows** (with the fused-row
+  consolidation for detector chains), not a separate table.
+- `Device`, `Event`, `Media`, `Telemetry` (as `health_records`) have real
+  tables; `Observation` exists as a schema contract
+  (`clawcam-observation.schema.json`) for export/cloud, not a gateway table.
 
 ## Schema Files
 

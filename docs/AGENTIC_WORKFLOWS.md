@@ -14,15 +14,20 @@ ClawCam uses agents to make field operations easier, but agents do not replace r
 
 ## Tool Categories
 
+All tool names below exist in the shipped 46-tool catalog
+(`docs/standards/mcp-tools.md`, generated from the code SSOT) unless
+explicitly marked *(future)*.
+
 | Category | Examples | Approval Requirement |
 |---|---|---|
-| Read-only | `get_recent_detections`, `get_node_health`, `get_gateway_metrics` | No approval by default. |
-| Analysis | `generate_daily_summary`, `list_species_detections`, `get_review_queue` | No approval by default. |
-| Capture | `capture_now`, `request_diagnostic_image` | Approval recommended unless local operator enables automatic mode. |
-| Configuration | `set_capture_interval`, `set_motion_sensitivity`, `set_power_profile` | Approval required. |
-| Destructive | `delete_media`, `purge_database`, `factory_reset_node` | Approval always required. |
-| Publication | `get_cloud_sync_status` (read) plus future `export_public_dataset`, `publish_location` | Approval always required. |
-| Firmware | `queue_firmware_update`, future `rollback_firmware` | Approval always required. |
+| Read-only | `get_recent_detections`, `get_node_health`, `list_capabilities` | Auto-approved. |
+| Analysis | `generate_daily_summary`, `get_site_report`, `list_species_detections`, `get_review_queue`, `get_fused_detections` | Auto-approved. |
+| Capture | `capture_now` | Approval-gated. |
+| Configuration | `apply_config_patch` (single gated patch surface — per-setting tools like capture interval and sensitivity ride through it), `set_device_state`, `set_device_detector_chain` | Approval-gated. |
+| Alerting / review | `create_alert_rule`, `apply_profile_alert_rules`, `set_review_state`, `create_detection_zone`, `create_schedule` | Approval-gated. |
+| Destructive | *(deliberately not implemented)* — no `delete_media` / `purge_database` / `factory_reset_node` tools exist; raw field evidence is never agent-deletable. | N/A — would always gate. |
+| Publication | `get_cloud_sync_status`, `export_detections_csv` (reads) plus *(future)* `export_public_dataset`, `publish_location` | Reads auto-approved; publication always gated. |
+| Firmware | `queue_firmware_update`, *(future)* `rollback_firmware` | Approval-gated. |
 
 ## First Skills
 
