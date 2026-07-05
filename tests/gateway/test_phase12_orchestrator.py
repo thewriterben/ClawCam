@@ -148,7 +148,9 @@ class TestChainResolution:
     def test_unknown_device_falls_back_general(self, tmp_db: GatewayDatabase):
         orch = InferenceOrchestrator(db=tmp_db)
         chain = orch.chain_for_device("never-registered")
-        assert chain == ["mock_detector"]
+        # General profile default: real detector only — mock_detector must
+        # never appear in a default chain (it fabricates detections).
+        assert chain == ["megadetector_v5"]
 
     def test_per_device_override_beats_profile(self, tmp_db: GatewayDatabase):
         tmp_db.set_device_detector_chain("cam-p12", ["face_recognizer", "plate_ocr"])

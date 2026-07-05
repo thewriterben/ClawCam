@@ -66,6 +66,12 @@ class InferencePipeline:
 
         try:
             detector = self._get_detector()
+            if not detector.is_available:
+                log.debug(
+                    "inference: no available detector (install model weights or "
+                    "set CLAWCAM_ALLOW_MOCKS=true); skipping event %s", event_id,
+                )
+                return None
             result = detector.detect(path)
             self._db.save_inference_result(event_id, media_path, result)
             log.info(

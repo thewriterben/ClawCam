@@ -161,9 +161,19 @@ class TestMegaDetectorV5Availability:
 # ── get_detector factory ──────────────────────────────────────────────────────
 
 class TestGetDetector:
-    def test_falls_back_to_mock_when_no_weights(self):
+    def test_falls_back_to_mock_when_allowed(self, monkeypatch):
+        monkeypatch.setenv("CLAWCAM_ALLOW_MOCKS", "true")
         detector = get_detector(weights_path=Path("/nonexistent/md_v5.pt"))
         assert isinstance(detector, MockDetector)
+
+    def test_no_mock_fallback_by_default(self, monkeypatch):
+        """Without CLAWCAM_ALLOW_MOCKS a model-less gateway must not fabricate
+        detections — the returned detector reports unavailable and the
+        pipeline skips inference instead."""
+        monkeypatch.delenv("CLAWCAM_ALLOW_MOCKS", raising=False)
+        detector = get_detector(weights_path=Path("/nonexistent/md_v5.pt"))
+        assert not isinstance(detector, MockDetector)
+        assert detector.is_available is False
 
 
 # ── InferencePipeline ─────────────────────────────────────────────────────────

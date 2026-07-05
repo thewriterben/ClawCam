@@ -105,14 +105,20 @@ def _default_registry() -> DetectorRegistry:
         return PlateOCRDetector()
     registry.register("plate_ocr", _plate_ocr)
 
-    # Audio classifiers also opt in here so the orchestrator can chain
-    # them across modalities in a future phase.
+    # Audio classifier names are registered so profile chains may mention
+    # them, but they resolve as unavailable in the *visual* orchestrator:
+    # audio is scored by the audio pipeline (Phase 11), and the previous
+    # MockDetector placeholders fabricated visual detections from thin air.
     def _audio_birdnet():
-        return MockDetector()  # placeholder visual no-op
+        raise NotImplementedError(
+            "audio_birdnet is handled by the audio pipeline, not the visual orchestrator"
+        )
     registry.register("audio_birdnet", _audio_birdnet)
 
     def _audio_glassbreak():
-        return MockDetector()
+        raise NotImplementedError(
+            "audio_glassbreak is handled by the audio pipeline, not the visual orchestrator"
+        )
     registry.register("audio_glassbreak", _audio_glassbreak)
 
     return registry

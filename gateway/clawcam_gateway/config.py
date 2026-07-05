@@ -7,6 +7,18 @@ from pathlib import Path
 import os
 
 
+def mocks_allowed() -> bool:
+    """True when mock detectors/classifiers may run (CLAWCAM_ALLOW_MOCKS).
+
+    Mocks emit fabricated detections (random coyote/person/glass_break hits)
+    that persist as real rows and can fire real alert webhooks, so they are
+    opt-in: set ``CLAWCAM_ALLOW_MOCKS=true`` for demos, simulation, and tests.
+    Explicitly naming ``mock_detector`` in a detector chain still works
+    regardless of this flag — that is a deliberate operator action.
+    """
+    return os.environ.get("CLAWCAM_ALLOW_MOCKS", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class GatewayConfig:
     """Runtime configuration for the ClawCam gateway."""
@@ -52,7 +64,8 @@ class GatewayConfig:
                                          # synchronously by tests and admin tools
     scheduler_tick_interval_s: int = 30
     # Audio pipeline (Phase 11)
-    audio_enabled: bool = True           # mock classifier always works, so on by default
+    audio_enabled: bool = True           # real classifiers when installed; mock fallback
+                                         # requires CLAWCAM_ALLOW_MOCKS=true
 
     @classmethod
     def from_env(cls) -> "GatewayConfig":

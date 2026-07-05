@@ -4,7 +4,8 @@ Resolves the detector list in priority order:
 
   1. Device-level ``detector_chain_json`` column (per-device override),
   2. Profile defaults (``ProfileDefaults.default_detectors``),
-  3. ``["mock_detector"]`` as the always-works fallback.
+  3. ``["megadetector_v5"]`` as the fallback (mock_detector never enters
+     a chain implicitly — it fabricates detections).
 
 Each resolvable detector runs against the same image; its result is
 persisted as a separate ``inference_results`` row. The first
@@ -57,7 +58,7 @@ class InferenceOrchestrator:
         else:
             profile = DEFAULT_PROFILE
         defaults = get_profile_defaults(profile)
-        return list(defaults.default_detectors) or ["mock_detector"]
+        return list(defaults.default_detectors) or ["megadetector_v5"]
 
     # ── Per-event run ─────────────────────────────────────────────────────
 
@@ -73,7 +74,15 @@ class InferenceOrchestrator:
         if not self._enabled:
             return []
 
-        chain = self.chain_for_device(device_id) if device_id else ["mock_detector"]
+        from clawcam_gateway.config import mocks_allowed
+
+        chain = self.chain_for_device(device_id) if device_id else ["megadetector_v5"]
+        # Demo/CI fallback: when mocks are explicitly allowed and the chain
+        # has no mock in it, append one so a model-less gateway still
+        # produces deterministic detections. Production (flag unset) instead
+        # skips unavailable detectors and records nothing.
+        if mocks_allowed() and "mock_detector" not in chain:
+            chain = [*chain, "mock_detector"]
         summaries: list[dict[str, Any]] = []
 
         for name in chain:

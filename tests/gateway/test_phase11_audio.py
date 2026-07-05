@@ -182,11 +182,20 @@ class TestMockAudioClassifier:
 
 
 class TestDefaultClassifier:
-    def test_default_is_available(self):
+    def test_mock_fallback_when_allowed(self, monkeypatch):
+        monkeypatch.setenv("CLAWCAM_ALLOW_MOCKS", "true")
         c = get_default_classifier()
         assert c.is_available
         # Without birdnetlib installed, should fall back to mock.
         assert isinstance(c, MockAudioClassifier)
+
+    def test_no_mock_fallback_by_default(self, monkeypatch):
+        """Model-less gateways must not fabricate glass_break/scream hits."""
+        monkeypatch.delenv("CLAWCAM_ALLOW_MOCKS", raising=False)
+        c = get_default_classifier()
+        assert not isinstance(c, MockAudioClassifier)
+        assert c.is_available is False
+        assert c.classify("anything.wav") == []
 
 
 # ── AudioPipeline ───────────────────────────────────────────────────────────
