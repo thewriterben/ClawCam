@@ -214,8 +214,11 @@ static void wifi_stop(void) {}
 
 static void init_components(void)
 {
+#ifndef CONFIG_CLAWCAM_BATTERY_ADC_CHANNEL
+#define CONFIG_CLAWCAM_BATTERY_ADC_CHANNEL (-1)
+#endif
     const clawcam_power_config_t power_config = {
-        .battery_adc_channel    = 0,
+        .battery_adc_channel    = CONFIG_CLAWCAM_BATTERY_ADC_CHANNEL,
         .pir_wake_gpio          = CLAWCAM_PIR_GPIO,
         .battery_capacity_mah   = 6600.0f,
         .low_battery_threshold_v = g_config.low_battery_threshold_v,
@@ -245,8 +248,13 @@ static void init_components(void)
 /* ── Device registration (HTTP, idempotent) ────────────────────────────── */
 
 #if CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED
+static bool s_registered_this_wake = false;
+
 static esp_err_t register_device_http(void)
 {
+    if (s_registered_this_wake) {
+        return ESP_OK; /* idempotent per wake cycle */
+    }
     clawcam_gateway_client_config_t gateway_config;
     esp_err_t err = clawcam_gateway_client_default_config(&gateway_config);
     if (err != ESP_OK) {
@@ -272,7 +280,79 @@ static esp_err_t register_device_http(void)
         "\"metadata\":{\"firmware_generated\":true,\"time_source\":\"%s\"}}",
         g_config.deployment_id, now, now, time_source);
 
-    return clawcam_gateway_client_register_device(&gateway_config, device_json);
+    err = clawcam_gateway_client_register_device(&gateway_config, device_json);
+    if (err == ESP_OK) {
+        s_registered_this_wake = true;
+    }
+    return err;
+}
+
+/*
+ * Build schema-valid health JSON and POST it to /api/v1/health. The battery
+ * block is included only when a reading exists (percentage >= 0); the storage
+ * block only when the SD card is mounted (schema: additionalProperties=false).
+ */
+static void report_health(const clawcam_power_state_t *power,
+                          const clawcam_storage_health_t *storage)
+{
+    char timestamp[32];
+    const char *time_source = "unknown";
+    get_iso8601_timestamp(timestamp, sizeof(timestamp), &time_source);
+
+    char battery_block[160] = "";
+    if (power->battery_percentage >= 0) {
+        snprintf(battery_block, sizeof(battery_block),
+                 ",\"battery\":{\"voltage\":%.2f,\"percentage\":%d,\"charging\":%s}",
+                 (double)power->battery_voltage,
+                 power->battery_percentage,
+                 power->charging ? "true" : "false");
+    }
+    char storage_block[224] = "";
+    if (storage->mounted) {
+        snprintf(storage_block, sizeof(storage_block),
+                 ",\"storage\":{\"free_bytes\":%llu,\"used_bytes\":%llu,"
+                 "\"total_bytes\":%llu,\"media_count\":%lu}",
+                 (unsigned long long)storage->free_bytes,
+                 (unsigned long long)storage->used_bytes,
+                 (unsigned long long)storage->total_bytes,
+                 (unsigned long)storage->media_count);
+    }
+
+    const char *status = "ok";
+    if (power->low_battery) {
+        status = "warning";
+    }
+
+    char health_json[768];
+    int n = snprintf(health_json, sizeof(health_json),
+        "{\"device_id\":\"" CLAWCAM_DEVICE_ID "\","
+        "\"timestamp\":\"%s\","
+        "\"status\":\"%s\","
+        "\"uptime_seconds\":%lld"
+        "%s%s,"
+        "\"errors\":[],"
+        "\"metadata\":{\"source\":\"field-firmware\",\"time_source\":\"%s\"}}",
+        timestamp, status,
+        (long long)(esp_timer_get_time() / 1000000LL),
+        battery_block, storage_block,
+        time_source);
+    if (n < 0 || (size_t)n >= sizeof(health_json)) {
+        ESP_LOGW(TAG, "health JSON too large; not reported");
+        return;
+    }
+
+    if (register_device_http() != ESP_OK) {
+        ESP_LOGW(TAG, "health not reported: device registration unavailable");
+        return;
+    }
+    clawcam_gateway_client_config_t gateway_config;
+    if (clawcam_gateway_client_default_config(&gateway_config) != ESP_OK) {
+        return;
+    }
+    esp_err_t err = clawcam_gateway_client_post_health(&gateway_config, health_json);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "health report failed: %s", esp_err_to_name(err));
+    }
 }
 #endif /* CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED */
 
@@ -389,6 +469,7 @@ static void persist_capture(
     esp_err_t mqtt_err = clawcam_mqtt_publish_event(&mqtt_cfg, event_json, NULL, &g_config);
     bool uploaded_via_mqtt = (mqtt_err == ESP_OK);
 
+    bool event_uploaded = uploaded_via_mqtt;
     if (!uploaded_via_mqtt) {
         clawcam_gateway_client_config_t gateway_config;
         esp_err_t gw_err = clawcam_gateway_client_default_config(&gateway_config);
@@ -400,11 +481,27 @@ static void persist_capture(
                 ESP_LOGW(TAG, "HTTP event upload failed (%s); SD event remains source of truth",
                          esp_err_to_name(up_err));
             } else {
+                event_uploaded = true;
                 clawcam_power_record_transmission();
             }
         }
     } else {
         clawcam_power_record_transmission();
+    }
+
+    /* Media bytes always travel over HTTP (MQTT carries only event JSON).
+     * This POST is what triggers gateway-side inference, alert evaluation,
+     * and cloud sync — without it the gateway only knows a capture happened. */
+    if (event_uploaded && capture->data != NULL && capture->length > 0) {
+        clawcam_gateway_client_config_t media_gw;
+        if (clawcam_gateway_client_default_config(&media_gw) == ESP_OK) {
+            esp_err_t media_err = clawcam_gateway_client_upload_media(
+                &media_gw, event_id, capture->data, capture->length);
+            if (media_err != ESP_OK) {
+                ESP_LOGW(TAG, "media upload failed (%s); SD artifact remains source of truth",
+                         esp_err_to_name(media_err));
+            }
+        }
     }
 #else
     ESP_LOGI(TAG, "gateway upload disabled; SD event is source of truth");
@@ -603,6 +700,12 @@ void app_main(void)
             ESP_LOGI(TAG, "executed %d gateway command(s) this wake cycle", handled);
         }
     }
+
+    /* Health snapshot per wake cycle: refresh state after capture/upload so
+     * the report reflects this cycle's battery + storage reality. */
+    clawcam_power_get_state(&power_state);
+    clawcam_storage_get_health(&storage_health);
+    report_health(&power_state, &storage_health);
 #endif
 
     enter_field_sleep((uint64_t)g_config.capture_interval_s);

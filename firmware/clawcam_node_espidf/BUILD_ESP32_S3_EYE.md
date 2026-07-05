@@ -45,6 +45,9 @@ When `CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT=y`, the firmware should initializ
 | Event artifact | Gateway-compatible event JSON is saved under `/sdcard/events`. |
 | Optional upload | If enabled, firmware registers the node via `/api/v1/devices` and uploads the event via `/api/v1/events`. |
 | Wi-Fi | Station bring-up is implemented behind `CONFIG_CLAWCAM_WIFI_ENABLED` (set `CLAWCAM_WIFI_SSID` / `CLAWCAM_WIFI_PASSWORD` in menuconfig). Without it, gateway upload/OTA/MQTT cannot reach the network. |
+| Gateway auth | Set `CLAWCAM_GATEWAY_API_TOKEN` in menuconfig when the gateway runs with auth enabled; sent as a Bearer header on all HTTP calls. |
+| Telemetry | Each wake cycle POSTs a schema-valid health report (battery when `CLAWCAM_BATTERY_ADC_CHANNEL` >= 0, storage when SD mounted) and uploads the JPEG to `/api/v1/media/{event_id}`, which is what triggers gateway inference/alerts/cloud sync. |
+| Storage policy | `min_free_bytes` is enforced before media writes; optional oldest-first auto-cleanup (`auto_cleanup_enabled`, max 16 deletions/wake). |
 | Next port | Field-validate Wi-Fi + upload on real hardware; add provisioning (softAP/BLE) for non-hardcoded credentials. |
 
 ## References

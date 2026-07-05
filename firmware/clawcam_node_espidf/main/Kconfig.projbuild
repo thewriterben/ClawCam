@@ -11,6 +11,16 @@ config CLAWCAM_PIR_GPIO
         PCLK pin — never route a PIR there. When disabled (-1) the node
         wakes on timer only.
 
+config CLAWCAM_BATTERY_ADC_CHANNEL
+    int "Battery voltage ADC1 channel (-1 to disable)"
+    default -1
+    range -1 9
+    help
+        ADC1 channel wired to the battery voltage divider. -1 disables
+        battery monitoring (the ESP32-S3-EYE has no battery sense pin);
+        health reports then omit the battery block and low-battery
+        protection is inactive.
+
 config CLAWCAM_WIFI_ENABLED
     bool "Connect to Wi-Fi at boot"
     default n

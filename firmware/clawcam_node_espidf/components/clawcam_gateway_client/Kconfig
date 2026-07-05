@@ -15,6 +15,16 @@ config CLAWCAM_GATEWAY_BASE_URL
     help
         Base URL for the local field gateway, without a trailing slash.
 
+config CLAWCAM_GATEWAY_API_TOKEN
+    string "Gateway API token (empty = no auth header)"
+    default ""
+    depends on CLAWCAM_GATEWAY_UPLOAD_ENABLED
+    help
+        API key issued by the gateway (POST /api/v1/api-keys). Sent as
+        'Authorization: Bearer <token>' on every HTTP call. Required when
+        the gateway runs with CLAWCAM_AUTH_ENABLED=true; harmless when
+        auth is disabled.
+
 config CLAWCAM_GATEWAY_HTTP_TIMEOUT_MS
     int "Gateway HTTP timeout in milliseconds"
     default 5000

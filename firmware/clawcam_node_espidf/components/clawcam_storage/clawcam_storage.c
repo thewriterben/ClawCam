@@ -1,9 +1,11 @@
 #include "clawcam_storage.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include "esp_check.h"
 #include "esp_log.h"
 
@@ -157,6 +159,93 @@ esp_err_t clawcam_storage_init(const clawcam_storage_config_t *config)
 #endif
 }
 
+#if CONFIG_CLAWCAM_STORAGE_USE_FATFS_SDMMC && CLAWCAM_HAVE_FATFS_SDMMC
+
+static esp_err_t get_fs_usage(uint64_t *total_out, uint64_t *free_out)
+{
+    return esp_vfs_fat_info(s_config.mount_point, total_out, free_out);
+}
+
+static uint32_t count_media_files(void)
+{
+    char path[192];
+    int written = snprintf(path, sizeof(path), "%s/%s", s_config.mount_point, media_dir());
+    if (written < 0 || (size_t)written >= sizeof(path)) {
+        return 0;
+    }
+    DIR *dir = opendir(path);
+    if (dir == NULL) {
+        return 0;
+    }
+    uint32_t count = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+        count++;
+    }
+    closedir(dir);
+    return count;
+}
+
+/* Delete the oldest media files (by mtime) until free space clears
+ * min_free_bytes, capped per wake cycle. A full card otherwise turns a trail
+ * camera into a brick until someone hikes out to it. */
+#define CLAWCAM_STORAGE_MAX_CLEANUP_PER_WAKE 16
+
+static void cleanup_oldest_media(void)
+{
+    char dir_path[192];
+    int written = snprintf(dir_path, sizeof(dir_path), "%s/%s", s_config.mount_point, media_dir());
+    if (written < 0 || (size_t)written >= sizeof(dir_path)) {
+        return;
+    }
+    for (int pass = 0; pass < CLAWCAM_STORAGE_MAX_CLEANUP_PER_WAKE; pass++) {
+        uint64_t total = 0, free_bytes = 0;
+        if (get_fs_usage(&total, &free_bytes) != ESP_OK || free_bytes >= s_config.min_free_bytes) {
+            return;
+        }
+        DIR *dir = opendir(dir_path);
+        if (dir == NULL) {
+            return;
+        }
+        char oldest[192] = {0};
+        time_t oldest_mtime = 0;
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (entry->d_name[0] == '.') {
+                continue;
+            }
+            char candidate[280];
+            int n = snprintf(candidate, sizeof(candidate), "%s/%s", dir_path, entry->d_name);
+            if (n < 0 || (size_t)n >= sizeof(candidate)) {
+                continue;
+            }
+            struct stat st;
+            if (stat(candidate, &st) != 0 || !S_ISREG(st.st_mode)) {
+                continue;
+            }
+            if (oldest[0] == '\0' || st.st_mtime < oldest_mtime) {
+                oldest_mtime = st.st_mtime;
+                snprintf(oldest, sizeof(oldest), "%s", candidate);
+            }
+        }
+        closedir(dir);
+        if (oldest[0] == '\0') {
+            return; /* nothing left to delete */
+        }
+        if (unlink(oldest) == 0) {
+            ESP_LOGW(TAG, "storage auto-cleanup: deleted oldest media %s", oldest);
+        } else {
+            ESP_LOGW(TAG, "storage auto-cleanup: failed to delete %s (errno=%d)", oldest, errno);
+            return;
+        }
+    }
+}
+
+#endif /* CONFIG_CLAWCAM_STORAGE_USE_FATFS_SDMMC && CLAWCAM_HAVE_FATFS_SDMMC */
+
 esp_err_t clawcam_storage_save_media(const clawcam_storage_media_t *media, char *out_path, size_t out_path_len)
 {
     if (!s_initialized) {
@@ -174,6 +263,22 @@ esp_err_t clawcam_storage_save_media(const clawcam_storage_media_t *media, char 
 #if CONFIG_CLAWCAM_STORAGE_USE_FATFS_SDMMC && CLAWCAM_HAVE_FATFS_SDMMC
     if (!s_mounted) {
         return ESP_ERR_INVALID_STATE;
+    }
+    if (s_config.min_free_bytes > 0) {
+        uint64_t total = 0, free_bytes = 0;
+        if (get_fs_usage(&total, &free_bytes) == ESP_OK && free_bytes < s_config.min_free_bytes) {
+            if (s_config.auto_cleanup_enabled) {
+                cleanup_oldest_media();
+                get_fs_usage(&total, &free_bytes);
+            }
+            if (free_bytes < s_config.min_free_bytes) {
+                ESP_LOGW(TAG, "storage below min_free (%llu < %llu bytes); media not saved"
+                              " — event JSON + upload continue",
+                         (unsigned long long)free_bytes,
+                         (unsigned long long)s_config.min_free_bytes);
+                return ESP_ERR_NO_MEM;
+            }
+        }
     }
     FILE *file = fopen(out_path, "wb");
     if (file == NULL) {
@@ -278,9 +383,17 @@ esp_err_t clawcam_storage_get_health(clawcam_storage_health_t *health)
     memset(health, 0, sizeof(*health));
     health->mounted = s_mounted;
 #if CONFIG_CLAWCAM_STORAGE_USE_FATFS_SDMMC && CLAWCAM_HAVE_FATFS_SDMMC
-    if (s_card != NULL) {
-        uint64_t total_bytes = ((uint64_t)s_card->csd.capacity) * s_card->csd.sector_size;
-        health->total_bytes = total_bytes;
+    if (s_mounted) {
+        uint64_t total = 0, free_bytes = 0;
+        if (get_fs_usage(&total, &free_bytes) == ESP_OK) {
+            health->total_bytes = total;
+            health->free_bytes = free_bytes;
+            health->used_bytes = total > free_bytes ? total - free_bytes : 0;
+        } else if (s_card != NULL) {
+            /* Fallback: card capacity only (free/used unknown). */
+            health->total_bytes = ((uint64_t)s_card->csd.capacity) * s_card->csd.sector_size;
+        }
+        health->media_count = count_media_files();
     }
 #endif
     return ESP_OK;

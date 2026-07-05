@@ -77,7 +77,19 @@ static void json_extract_str(const char *json, const char *key, char *buf, size_
 
 #if CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED && CLAWCAM_HAVE_ESP_HTTP_CLIENT
 
-static esp_err_t http_get_response(const char *url, int timeout_ms, char *buf, size_t buf_len)
+static void set_bearer_auth(esp_http_client_handle_t client, const char *token)
+{
+    if (token == NULL || token[0] == '\0') {
+        return;
+    }
+    char auth[192];
+    int n = snprintf(auth, sizeof(auth), "Bearer %s", token);
+    if (n > 0 && (size_t)n < sizeof(auth)) {
+        esp_http_client_set_header(client, "Authorization", auth);
+    }
+}
+
+static esp_err_t http_get_response(const char *url, const char *token, int timeout_ms, char *buf, size_t buf_len)
 {
     esp_http_client_config_t cfg = {
         .url = url,
@@ -86,6 +98,7 @@ static esp_err_t http_get_response(const char *url, int timeout_ms, char *buf, s
     };
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) return ESP_FAIL;
+    set_bearer_auth(client, token);
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) { esp_http_client_cleanup(client); return err; }
     int content_len = esp_http_client_fetch_headers(client);
@@ -98,7 +111,7 @@ static esp_err_t http_get_response(const char *url, int timeout_ms, char *buf, s
     return (status >= 200 && status < 300) ? ESP_OK : ESP_FAIL;
 }
 
-static esp_err_t http_post(const char *url, const char *body, int timeout_ms)
+static esp_err_t http_post(const char *url, const char *token, const char *body, int timeout_ms)
 {
     esp_http_client_config_t cfg = {
         .url = url,
@@ -107,6 +120,7 @@ static esp_err_t http_post(const char *url, const char *body, int timeout_ms)
     };
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) return ESP_FAIL;
+    set_bearer_auth(client, token);
     esp_http_client_set_header(client, "Content-Type", "application/json");
     esp_http_client_set_post_field(client, body, (int)strlen(body));
     esp_err_t err = esp_http_client_perform(client);
@@ -135,7 +149,7 @@ static void send_ack(const clawcam_command_client_config_t *cfg,
              status, message ? message : "", cfg->device_id);
 
 #if CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED && CLAWCAM_HAVE_ESP_HTTP_CLIENT
-    esp_err_t err = http_post(url, body, cfg->gateway_config->timeout_ms);
+    esp_err_t err = http_post(url, cfg->gateway_config->api_token, body, cfg->gateway_config->timeout_ms);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "ack POST failed for %s: %s", command_id, esp_err_to_name(err));
     } else {
@@ -244,7 +258,7 @@ int clawcam_command_client_poll(const clawcam_command_client_config_t *cfg)
 
 #if CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED && CLAWCAM_HAVE_ESP_HTTP_CLIENT
     static char response[RESPONSE_BUF_SIZE];
-    esp_err_t err = http_get_response(url, cfg->gateway_config->timeout_ms, response, sizeof(response));
+    esp_err_t err = http_get_response(url, cfg->gateway_config->api_token, cfg->gateway_config->timeout_ms, response, sizeof(response));
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "command poll GET failed: %s", esp_err_to_name(err));
         return -err;
