@@ -110,7 +110,9 @@ def _device_from_event(event: dict[str, Any]) -> dict[str, Any]:
             "version": "0.1.0",
             "source": "firmware-bundle-import",
         },
-        "deployment_id": event.get("deployment_id"),
+        # Never emit a None deployment_id: a present-but-None key defeats the
+        # DB layer's .get(..., "default") fallback and violates NOT NULL.
+        "deployment_id": event.get("deployment_id") or "default",
         "capabilities": ["camera", "sd_fatfs", "event_artifact"],
         "status": "active",
         "created_at": created_at,

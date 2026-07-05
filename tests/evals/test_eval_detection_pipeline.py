@@ -25,6 +25,16 @@ from clawcam_gateway.storage.database import GatewayDatabase
 JPEG_BYTES = bytes.fromhex("ffd8ffe000104a46494600010100000100010000ffd9")
 
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _allow_mocks(monkeypatch):
+    """Evals exercise the deterministic mock pipeline end-to-end; mocks are
+    opt-in via CLAWCAM_ALLOW_MOCKS since they fabricate detections."""
+    monkeypatch.setenv("CLAWCAM_ALLOW_MOCKS", "true")
+
+
 def _setup(tmp_path) -> tuple[TestClient, dict]:
     """Seed a gateway via the simulator; return a TestClient and a valid
     event template taken from the simulator's schema-valid output."""

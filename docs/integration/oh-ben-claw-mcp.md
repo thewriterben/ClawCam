@@ -32,7 +32,11 @@ Start the ClawCam stdio bridge when the agent runtime launches it:
 PYTHONPATH=. python -m clawcam_gateway.mcp_server.stdio_server --db ../clawcam_gateway.db
 ```
 
-The bridge supports `initialize`, `tools/list`, `tools/call`, and `ping`. Read-only tools currently include `get_recent_detections`, `get_node_health`, and `generate_daily_summary`.
+The bridge supports `initialize`, `tools/list`, `tools/call`, and `ping`, in both
+`legacy-2024` and `stateless-2026` protocol modes. It exposes 46 tools — 35
+auto-approved reads (detections, health, analytics reports, review queue,
+calibration, encounters, anomalies, audio, zones, schedules, profiles…) and 11
+approval-gated writes. The full generated catalog is `docs/standards/mcp-tools.md`.
 
 ## Tool Policy
 
@@ -44,6 +48,9 @@ The bridge supports `initialize`, `tools/list`, `tools/call`, and `ping`. Read-o
 | `capture_now` | Approval required | Can affect wildlife, battery, storage, and privacy. |
 | `apply_config_patch` | Approval required | Mutates field-device behavior. |
 
-## Next Adapter Step
+## Adapter
 
-The next implementation task is to add a small Oh-Ben-Claw-side adapter or example loader that reads this config, launches the stdio bridge, calls `tools/list`, and registers the returned ClawCam tools with the Oh-Ben-Claw tool registry.
+The Oh-Ben-Claw-side adapter exists: `brain/oh-ben-claw-adapter/clawcam_adapter.py`
+launches the stdio bridge, calls `tools/list`, and registers the returned tools
+with the Oh-Ben-Claw registry under the gateway's approval policy (call/session/
+forever scopes, plan-mode argument bounds). See that directory's README.

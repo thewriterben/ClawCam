@@ -54,6 +54,11 @@ def test_orchestrator_skips_unavailable_bird_classifier(tmp_path):
     })
     img = tmp_path / "x.jpg"
     img.write_bytes(b"FAKEJPEG")
+    db.upsert_device({
+        "device_id": "cam-bc", "device_type": "node", "name": "Bird Chain Test",
+        "status": "active", "created_at": "2026-05-15T00:00:00Z",
+        "last_seen_at": "2026-05-15T00:00:00Z",
+    })
     db.set_device_detector_chain("cam-bc", ["mock_detector", "bird_classifier"])
     orch = InferenceOrchestrator(db=db)  # default registry: bird_classifier unavailable in CI
     summaries = orch.run("evt-bc", str(img), device_id="cam-bc")

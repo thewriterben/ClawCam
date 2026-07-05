@@ -25,7 +25,9 @@ dev = [
 # Optional model runtimes — install with: pip install "clawcam-gateway[vision]"
 vision = [
   "torch>=2.0",
-  "pillow>=10.0"
+  "pillow>=10.0",
+  # MegaDetectorV5 loads via the ultralytics YOLO API (inference/detector.py).
+  "ultralytics>=8.0"
 ]
 # Optional OCR runtime (license-plate reading) — pip install "clawcam-gateway[ocr]"
 ocr = [
@@ -40,7 +42,19 @@ audio = [
   "tensorflow>=2.13",
   "tensorflow-hub>=0.14",
   "soundfile>=0.12",
-  "numpy>=1.24"
+  "numpy>=1.24",
+  # BirdNET species ID (audio/birdnet.py) needs birdnetlib + librosa.
+  "birdnetlib>=0.17",
+  "librosa>=0.10"
+]
+# Optional MQTT transport (gateway <-> node bridge) — pip install "clawcam-gateway[mqtt]"
+mqtt = [
+  "paho-mqtt>=1.6"
+]
+# Optional cloud media sync backends — pip install "clawcam-gateway[cloud]"
+cloud = [
+  "boto3>=1.28",
+  "google-cloud-storage>=2.10"
 ]
 
 [tool.pytest.ini_options]

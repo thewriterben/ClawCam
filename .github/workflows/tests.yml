@@ -26,8 +26,12 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install ruff + mypy
-        run: python -m pip install --upgrade pip ruff mypy
+      # Install the real runtime deps so mypy checks against actual
+      # fastapi/pydantic types instead of stubless no-ops.
+      - name: Install ruff + mypy + runtime deps
+        run: |
+          python -m pip install --upgrade pip ruff mypy
+          python -m pip install -e "gateway/[dev,mqtt]"
 
       - name: Ruff check
         run: python -m ruff check --config gateway/pyproject.toml gateway/clawcam_gateway brain/oh-ben-claw-adapter
@@ -56,20 +60,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
+      # Install the package itself so pyproject metadata (deps, extras) is
+      # exercised by CI instead of a hand-maintained list that can drift.
+      # paho-mqtt comes from the [mqtt] extra (test_phase3b_mqtt imports it).
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install \
-            fastapi \
-            pytest \
-            pytest-asyncio \
-            httpx \
-            paho-mqtt \
-            pillow \
-            jsonschema \
-            python-multipart \
-            pydantic \
-            croniter
+          python -m pip install -e "gateway/[dev,mqtt]" 
 
       # The full gated suite is defined by `testpaths` in gateway/pyproject.toml
       # (gateway, schemas, evals, integration, firmware). Running pytest from the

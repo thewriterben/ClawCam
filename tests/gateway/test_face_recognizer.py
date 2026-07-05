@@ -56,6 +56,11 @@ def test_orchestrator_skips_unavailable_face_recognizer(tmp_path):
     })
     img = tmp_path / "x.jpg"
     img.write_bytes(b"FAKEJPEG")
+    db.upsert_device({
+        "device_id": "cam-fr", "device_type": "node", "name": "Face Chain Test",
+        "status": "active", "created_at": "2026-05-15T00:00:00Z",
+        "last_seen_at": "2026-05-15T00:00:00Z",
+    })
     db.set_device_detector_chain("cam-fr", ["mock_detector", "face_recognizer"])
     orch = InferenceOrchestrator(db=db)
     stored = [s for s in orch.run("evt-fr", str(img), device_id="cam-fr") if s.get("stored")]

@@ -62,7 +62,7 @@ def build_encounter_report(
         by_subject.setdefault(_subject(d), []).append(ts)
 
     encounters: list[dict[str, Any]] = []
-    per_subject: dict[str, dict[str, int]] = {}
+    per_subject: dict[str, dict[str, Any]] = {}
     for subject, times in by_subject.items():
         times.sort()
         run_start = times[0]

@@ -14,9 +14,9 @@ This directory tracks model integrations and deployment notes. Models should be 
 
 | Directory | Purpose |
 |---|---|
-| `speciesnet/` | Notes and adapters for SpeciesNet-style species classification. |
-| `megadetector/` | Notes and adapters for detection-first camera-trap workflows. |
-| `espdl/` | ESP-DL model conversion and deployment notes. |
+| `speciesnet/` *(planned)* | Notes and adapters for SpeciesNet-style species classification. |
+| `megadetector/` *(planned)* | Drop MegaDetector weights here or set `CLAWCAM_INFERENCE_WEIGHTS`. |
+| `espdl/` *(planned)* | ESP-DL model conversion and deployment notes. |
 
 ## Policy
 

@@ -136,7 +136,8 @@ def _check_event_access(db, auth: AuthContext, event_id: str) -> None:
 def create_app(config: GatewayConfig | None = None) -> FastAPI:
     config = config or GatewayConfig.from_env()
     db = GatewayDatabase(config.database_path)
-    pipeline = InferencePipeline(db=db, enabled=config.inference_enabled)
+    pipeline = InferencePipeline(db=db, enabled=config.inference_enabled,
+                                 weights_path=config.inference_weights_path)
     inference_orchestrator = InferenceOrchestrator(db=db, enabled=config.inference_enabled)
     cloud_store = get_cloud_store(config)
     cloud_worker = CloudUploadWorker(db=db, store=cloud_store)
@@ -144,7 +145,8 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
                                      allow_private_hosts=config.webhook_allow_private_hosts,
                                      dedup_window_s=config.alert_dedup_window_s,
                                      min_severity=config.alert_min_severity)
-    schedule_engine = ScheduleEngine(db=db, allow_private_hosts=config.webhook_allow_private_hosts)
+    schedule_engine = ScheduleEngine(db=db, allow_private_hosts=config.webhook_allow_private_hosts,
+                                     tick_interval_s=config.scheduler_tick_interval_s)
     audio_pipeline = AudioPipeline(db=db, enabled=config.audio_enabled)
     bridge = MQTTBridge(
         db=db,
@@ -833,10 +835,10 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         if db.get_device(device_id) is None:
             raise HTTPException(status_code=404, detail=f"unknown device: {device_id}")
         safe_limit = max(1, min(limit, 50))
-        commands = db.list_pending_commands(device_id=device_id, status="queued")[:safe_limit]
-        # Mark returned commands as "delivered" so they aren't re-sent on the next poll
-        for cmd in commands:
-            db.update_command_status(cmd["command_id"], "delivered")
+        # Atomic claim: fetch + mark delivered in one UPDATE...RETURNING so two
+        # concurrent polls can never double-deliver, and the returned payloads
+        # carry status='delivered' rather than a stale 'queued'.
+        commands = db.claim_pending_commands(device_id, limit=safe_limit)
         return {"ok": True, "device_id": device_id, "commands": commands, "count": len(commands)}
 
     @app.post("/api/v1/commands/{command_id}/ack")
@@ -873,13 +875,18 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         The event must already exist (registered via POST /api/v1/events).
         Inference runs asynchronously so this endpoint returns immediately.
         """
+        # Traversal check first (400), then existence (404) — the id is used
+        # as a path component below.
+        if not _safe_path_component(event_id):
+            raise HTTPException(status_code=400, detail="invalid event_id")
+        event_row = db.get_event(event_id)
+        if event_row is None:
+            raise HTTPException(status_code=404, detail=f"unknown event: {event_id}")
+
         _existing = db.get_inference_result(event_id)
         if _existing is not None and _existing.get("model_name") != "mock_detector":
             # Already processed; accept the upload but skip re-inference
             return {"ok": True, "event_id": event_id, "inference": "already_processed"}
-
-        if not _safe_path_component(event_id):
-            raise HTTPException(status_code=400, detail="invalid event_id")
         # Save the uploaded file into the configured media directory
         config.media_dir.mkdir(parents=True, exist_ok=True)
         suffix = _safe_suffix(file.filename, (".jpg", ".jpeg", ".png"), ".jpg")
@@ -895,8 +902,7 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         # exist for the originating device. Done synchronously before
         # inference because the masked frame is what gets analysed and stored.
         try:
-            event_row = db.get_event(event_id)
-            originating_device = (event_row or {}).get("device_id")
+            originating_device = event_row.get("device_id")
             if originating_device:
                 zones = db.list_detection_zones(
                     device_id=originating_device, enabled_only=True,
@@ -904,14 +910,19 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
                 if any(z.get("action") == "privacy_mask" for z in zones):
                     from clawcam_gateway.zones import apply_privacy_masks
                     apply_privacy_masks(dest, zones)
-        except Exception:  # noqa: BLE001 - never block ingest on mask errors
-            pass
+        except Exception as exc:  # noqa: BLE001 - never block ingest on mask errors
+            # Loudly logged: a swallowed failure here means an UNMASKED frame
+            # persists for a device whose zones promise privacy masking.
+            import logging
+            logging.getLogger(__name__).warning(
+                "privacy mask application failed for event %s: %s", event_id, exc,
+            )
 
         # Phase 12: orchestrator runs the full detector chain configured for
         # this device's profile (with per-device override if set). Legacy
         # single-detector pipeline kept as a fallback for tests that don't
         # set up a device row first.
-        originating_device_id = (event_row or {}).get("device_id") if 'event_row' in locals() else None
+        originating_device_id = event_row.get("device_id")
         if originating_device_id:
             background_tasks.add_task(
                 inference_orchestrator.run, event_id, str(dest),
@@ -1292,15 +1303,14 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
 
     @app.post("/api/v1/cloud/retry")
     def retry_failed_uploads(background_tasks: BackgroundTasks, auth: AuthContext = Depends(require_write)) -> dict[str, Any]:
-        """Re-queue all failed cloud uploads for retry in the background."""
+        """Retry all failed cloud uploads in the background.
+
+        Each retry transitions the EXISTING cloud_uploads row (previously a
+        new row was inserted per attempt, so the failed counter only grew).
+        """
         failed = db.list_cloud_uploads(status="failed", limit=500)
         for upload in failed:
-            media_path = Path(upload["media_path"])
-            background_tasks.add_task(
-                cloud_worker.queue_and_upload,
-                media_path,
-                upload.get("event_id"),
-            )
+            background_tasks.add_task(cloud_worker.retry_upload, upload)
         return {
             "ok": True,
             "retried": len(failed),
@@ -1511,4 +1521,12 @@ def _dashboard_payload(db: GatewayDatabase, config: GatewayConfig, limit: int = 
     }
 
 
-app = create_app()
+def app_factory() -> FastAPI:
+    """Uvicorn factory entrypoint: ``uvicorn --factory clawcam_gateway.api.app:app_factory``.
+
+    A module-level ``app = create_app()`` used to run here, which meant
+    merely importing this module created and migrated a SQLite database in
+    the current working directory (the source of stray ``clawcam_gateway.db``
+    files at repo root). Construct the app explicitly instead.
+    """
+    return create_app()

@@ -41,7 +41,14 @@ class GatewayDatabase:
             conn.executescript(
                 """
                 PRAGMA journal_mode=WAL;
-                PRAGMA foreign_keys=ON;
+
+                -- NOTE: SQLite foreign keys are declared below for documentation
+                -- and tooling, but deliberately NOT enforced at runtime
+                -- (PRAGMA foreign_keys is per-connection and connect() leaves it
+                -- off). ClawCam is offline-first: events, health, and inference
+                -- rows may arrive before their parent device/event is registered
+                -- (firmware bundles, MQTT, out-of-order sync), so referential
+                -- integrity is enforced at the API layer where ordering is known.
 
                 CREATE TABLE IF NOT EXISTS devices (
                     device_id TEXT PRIMARY KEY,
@@ -434,8 +441,8 @@ class GatewayDatabase:
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO media
-                    (media_id, event_id, media_type, path, uri, mime_type, size_bytes, sha256, payload_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (media_id, event_id, media_type, path, uri, mime_type, size_bytes, sha256, payload_json, deployment_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         media["media_id"],
@@ -447,6 +454,7 @@ class GatewayDatabase:
                         media.get("size_bytes"),
                         media.get("sha256"),
                         json.dumps(media, sort_keys=True),
+                        payload.get("deployment_id", "default"),
                     ),
                 )
 
@@ -454,14 +462,15 @@ class GatewayDatabase:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO health_records (device_id, timestamp, status, payload_json)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO health_records (device_id, timestamp, status, payload_json, deployment_id)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     payload["device_id"],
                     payload["timestamp"],
                     payload["status"],
                     json.dumps(payload, sort_keys=True),
+                    payload.get("deployment_id", "default"),
                 ),
             )
 
@@ -591,6 +600,36 @@ class GatewayDatabase:
                 ).fetchall()
         return [json.loads(row["payload_json"]) for row in rows]
 
+    def claim_pending_commands(self, device_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        """Atomically fetch queued commands for a device and mark them delivered.
+
+        Single UPDATE ... RETURNING inside one transaction: two concurrent
+        polls can never deliver the same command twice, and the returned
+        payloads carry status='delivered' (previously the poll returned
+        payloads still stamped 'queued' and used a non-atomic read-then-mark).
+        """
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                UPDATE pending_commands
+                SET status = 'delivered', updated_at = datetime('now')
+                WHERE command_id IN (
+                    SELECT command_id FROM pending_commands
+                    WHERE device_id = ? AND status = 'queued'
+                    ORDER BY created_at ASC
+                    LIMIT ?
+                )
+                RETURNING payload_json
+                """,
+                (device_id, limit),
+            ).fetchall()
+        commands = []
+        for row in rows:
+            payload = json.loads(row["payload_json"])
+            payload["status"] = "delivered"
+            commands.append(payload)
+        return commands
+
     def update_command_status(self, command_id: str, status: str, result: dict[str, Any] | None = None) -> bool:
         with self.connect() as conn:
             if result is not None:
@@ -610,8 +649,14 @@ class GatewayDatabase:
                     return False
             else:
                 cursor = conn.execute(
-                    "UPDATE pending_commands SET status = ?, updated_at = datetime('now') WHERE command_id = ?",
-                    (status, command_id),
+                    """
+                    UPDATE pending_commands
+                    SET status = ?,
+                        payload_json = json_set(payload_json, '$.status', ?),
+                        updated_at = datetime('now')
+                    WHERE command_id = ?
+                    """,
+                    (status, status, command_id),
                 )
         return cursor.rowcount > 0
 
@@ -721,8 +766,14 @@ class GatewayDatabase:
         deployment_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """List recent inference results with optional filtering."""
-        clauses = ["top_confidence >= ?"]
-        params: list[Any] = [min_confidence]
+        # NULL top_confidence (legacy rows / detectors with no boxes) must not
+        # vanish from unfiltered listings: include NULLs when no floor is set.
+        if min_confidence > 0:
+            clauses = ["top_confidence >= ?"]
+            params: list[Any] = [min_confidence]
+        else:
+            clauses = ["(top_confidence >= ? OR top_confidence IS NULL)"]
+            params = [min_confidence]
         if label:
             clauses.append("top_label = ?")
             params.append(label)
@@ -866,15 +917,27 @@ class GatewayDatabase:
         error: str | None = None,
         uploaded_at: str | None = None,
     ) -> None:
-        """Update status and optional fields for a cloud_uploads row."""
+        """Update status and any provided optional fields for a cloud_uploads row.
+
+        Omitted optional fields are left untouched (previously they were
+        unconditionally overwritten with NULL).
+        """
+        sets = ["status = ?"]
+        params: list[Any] = [status]
+        if remote_uri is not None:
+            sets.append("remote_uri = ?")
+            params.append(remote_uri)
+        if error is not None:
+            sets.append("error = ?")
+            params.append(error)
+        if uploaded_at is not None:
+            sets.append("uploaded_at = ?")
+            params.append(uploaded_at)
+        params.append(upload_id)
         with self.connect() as conn:
             conn.execute(
-                """
-                UPDATE cloud_uploads
-                SET status = ?, remote_uri = ?, error = ?, uploaded_at = ?
-                WHERE upload_id = ?
-                """,
-                (status, remote_uri, error, uploaded_at, upload_id),
+                f"UPDATE cloud_uploads SET {', '.join(sets)} WHERE upload_id = ?",
+                params,
             )
 
     def list_cloud_uploads(

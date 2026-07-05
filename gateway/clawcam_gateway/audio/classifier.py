@@ -156,8 +156,11 @@ def get_default_classifier() -> BaseAudioClassifier:
     """Return the best available audio classifier.
 
     Composes every available real classifier (BirdNET species ID + YAMNet
-    alarm events); returns a single one if only one is available, or the
-    deterministic mock when none are (e.g. in CI / model-less gateways).
+    alarm events); returns a single one if only one is available. When none
+    are, the deterministic mock is returned only if ``CLAWCAM_ALLOW_MOCKS``
+    is set (CI / demos) — otherwise an empty, unavailable composite is
+    returned so a model-less gateway records nothing instead of fabricating
+    glass_break/scream hits that can fire real alert webhooks.
     """
     reals: list[BaseAudioClassifier] = []
     candidate: BaseAudioClassifier
@@ -179,4 +182,7 @@ def get_default_classifier() -> BaseAudioClassifier:
         return reals[0]
     if reals:
         return CompositeAudioClassifier(reals)
-    return MockAudioClassifier()
+    from clawcam_gateway.config import mocks_allowed
+    if mocks_allowed():
+        return MockAudioClassifier()
+    return CompositeAudioClassifier([])  # is_available == False; pipeline stores nothing

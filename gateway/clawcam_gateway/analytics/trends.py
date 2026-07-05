@@ -76,7 +76,7 @@ def build_trend_report(
         counts[day] = counts.get(day, 0) + 1
         all_days[day] = all_days.get(day, 0) + 1
 
-    species = []
+    species: list[dict[str, Any]] = []
     for subject, counts in per.items():
         days_sorted = sorted(counts.items())  # [(date, count)], chronological
         daily_counts = [c for _, c in days_sorted]

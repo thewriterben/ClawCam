@@ -10,7 +10,8 @@ from clawcam_gateway.config import GatewayConfig
 def main() -> None:
     config = GatewayConfig.from_env()
     uvicorn.run(
-        "clawcam_gateway.api.app:app",
+        "clawcam_gateway.api.app:app_factory",
+        factory=True,
         host=config.host,
         port=config.port,
         reload=False,

@@ -43,3 +43,13 @@ pytest-cache-files-*/
 
 # Python build artifacts
 *.egg-info/
+
+# Linter/type-checker caches
+.ruff_cache/
+.mypy_cache/
+
+# Local notes (not part of the project)
+Knowledge Base/
+
+# Legacy source archives are no longer tracked (see legacy_archives/README.md)
+legacy_archives/*.zip
