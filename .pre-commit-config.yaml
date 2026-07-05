@@ -3,8 +3,11 @@
 # Run against everything on demand with:
 #   pre-commit run --all-files
 #
-# Mirrors CI: ruff lint matches the Tests workflow, and the line-ending hook
-# keeps the tree LF-only (paired with .gitattributes) so CRLF churn can't return.
+# Partially mirrors CI: ruff lint matches the Tests workflow, and the
+# line-ending hook keeps the tree LF-only (paired with .gitattributes) so CRLF
+# churn can't return. Mypy runs in CI only — it needs the full runtime deps
+# installed, which is too heavy for a commit hook; run it locally with:
+#   pip install -e "gateway/[dev,mqtt]" mypy && (cd gateway && mypy clawcam_gateway)
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.13.0

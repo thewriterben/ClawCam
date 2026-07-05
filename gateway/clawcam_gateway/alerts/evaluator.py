@@ -201,6 +201,8 @@ class AlertEvaluator:
         payload["severity"] = severity
 
         # ── Minimum-severity delivery gate ────────────────────────────────
+        status_code: int | None
+        error: str | None
         if severity_rank(severity) < severity_rank(self._min_severity):
             success, status_code, error = False, None, "below min severity"
             delivery_status = "skipped_severity"
