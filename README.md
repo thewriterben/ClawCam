@@ -29,7 +29,7 @@ ClawCam’s development is intentionally phased to ensure each milestone deliver
 - Node Simulator: **Working**
 - Gateway Service: **Working** (FastAPI + SQLite; auth, inference, MQTT, OTA, alerts, schedules, zones, audio)
 - Firmware (ESP-IDF): **Working in simulation** (capture loop, deep sleep, command client, MQTT, OTA — pending field validation on hardware)
-- Brain Integration: **Working** (ClawCamAdapter: MCP stdio bridge, 23 auto-approved read tools, 9 approval-gated write tools)
+- Brain Integration: **Working** (ClawCamAdapter: MCP stdio bridge, 35 auto-approved read tools, 11 approval-gated write tools)
 - Cloud Backend: **Working** (optional; S3/GCS; disabled by default)
 
 *For a more detailed view on progress tracking and milestones, check the [STATUS.md](docs/STATUS.md).*
@@ -110,4 +110,4 @@ ClawCam/
 
 For additional references on upcoming phases and detailed milestones, visit:
 - [Roadmap (docs/ROADMAP.md)](docs/ROADMAP.md)
-- [Status Details (docs/STATUS.md)](docs/STATUS.md)
+- [Status Details (docs/STATUS.md)](docs/STATUS.md

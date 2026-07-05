@@ -7,11 +7,11 @@
   "last_seen_at": "2026-05-12T12:05:00Z",
   "deployment_id": "deploy-north-ridge-2026",
   "capabilities": [
-    "capture",
-    "motion",
-    "battery",
-    "storage",
-    "environment"
+    "cap_clawcam_camera_trap",
+    "cap_clawcam_sensors",
+    "cap_clawcam_power",
+    "cap_clawcam_storage",
+    "cap_clawcam_events"
   ],
   "hardware": {
     "board": "esp32-s3-camera",
@@ -35,6 +35,4 @@
   },
   "metadata": {
     "profile": "phase1-simulator",
-    "notes": "Representative device payload for ClawCam Phase 1 vertical slice."
-  }
-}
+    "notes": "Representative dev
