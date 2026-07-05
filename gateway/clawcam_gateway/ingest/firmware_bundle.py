@@ -113,7 +113,13 @@ def _device_from_event(event: dict[str, Any]) -> dict[str, Any]:
         # Never emit a None deployment_id: a present-but-None key defeats the
         # DB layer's .get(..., "default") fallback and violates NOT NULL.
         "deployment_id": event.get("deployment_id") or "default",
-        "capabilities": ["camera", "sd_fatfs", "event_artifact"],
+        # Canonical cap_clawcam_* tokens (D-M5): gated commands string-match
+        # these — a node auto-registered with legacy names like "camera"
+        # could never receive capture_now. The firmware this importer
+        # ingests bundles from is a camera trap with SD storage that emits
+        # capture events, hence these three.
+        "capabilities": ["cap_clawcam_camera_trap", "cap_clawcam_storage",
+                         "cap_clawcam_events"],
         "status": "active",
         "created_at": created_at,
         "last_seen_at": event.get("timestamp"),

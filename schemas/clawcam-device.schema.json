@@ -43,7 +43,11 @@
     "deployment_id": {"type": ["string", "null"]},
     "capabilities": {
       "type": "array",
-      "items": {"type": "string"},
+      "items": {
+        "type": "string",
+        "pattern": "^cap_clawcam_[a-z_]+$",
+        "description": "Canonical capability token (cap_clawcam_camera_trap, cap_clawcam_sensors, cap_clawcam_power, cap_clawcam_storage, cap_clawcam_events, cap_clawcam_firmware_ota). Legacy short names like 'capture' or 'motion' are rejected: gated commands (capture_now, queue_firmware_update) match the canonical tokens, so a device registered with legacy names could never receive them."
+      },
       "uniqueItems": true,
       "default": []
     },
