@@ -1,9 +1,11 @@
 """Site report — one operator-facing summary of a deployment.
 
-Stitches the three analytics roll-ups into a single answer to "what's happening at this
+Stitches the analytics roll-ups into a single answer to "what's happening at this
 site?": *when* species are active (`activity`), *how the rates are trending* (`trends`),
-and *what alerted* (`alerts` digest) — plus a compact ``headline`` an operator (or the
-brain) can read at a glance.
+*how diverse* it is (`diversity`), *how many real visits* there were (`encounters`, so
+the headline carries honest visit counts alongside raw frames), and *what alerted*
+(`alerts` digest) — plus a compact ``headline`` an operator (or the brain) can read at a
+glance.
 
 Pure and storage-agnostic: it composes the other pure builders (no DB or framework
 imports), so it unit-tests in isolation.
@@ -17,6 +19,7 @@ from clawcam_gateway.alerts.digest import build_alert_digest
 
 from .activity import build_activity_report
 from .diversity import build_diversity_report
+from .encounters import build_encounter_report
 from .trends import build_trend_report
 
 
@@ -25,6 +28,7 @@ def build_site_report(
     alert_events: list[dict[str, Any]] | None = None,
     tz_offset_hours: int = 0,
     digest_window_label: str = "",
+    encounter_gap_minutes: int = 30,
 ) -> dict[str, Any]:
     """Combine activity, trend, and alert-digest roll-ups into one site summary.
 
@@ -42,6 +46,7 @@ def build_site_report(
     activity = build_activity_report(detections, tz_offset_hours=tz_offset_hours)
     trends = build_trend_report(detections, tz_offset_hours=tz_offset_hours)
     diversity = build_diversity_report(detections)
+    encounters = build_encounter_report(detections, gap_minutes=encounter_gap_minutes)
     alerts = build_alert_digest(alert_events, window_label=digest_window_label)
 
     top_subject = activity["species"][0]["subject"] if activity["species"] else None
@@ -55,6 +60,7 @@ def build_site_report(
 
     headline = {
         "total_detections": activity["total_detections"],
+        "total_encounters": encounters["total_encounters"],
         "distinct_subjects": activity["distinct_subjects"],
         "days_span": trends["days_span"],
         "top_subject": top_subject,
@@ -73,5 +79,6 @@ def build_site_report(
         "activity": activity,
         "trends": trends,
         "diversity": diversity,
+        "encounters": encounters,
         "alerts": alerts,
     }

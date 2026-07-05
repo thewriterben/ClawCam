@@ -21,8 +21,9 @@ def test_empty_site_report():
     assert r["headline"]["total_detections"] == 0
     assert r["headline"]["top_subject"] is None
     assert r["headline"]["total_alerts"] == 0
-    # All three sub-reports are always present.
-    assert set(r) >= {"headline", "activity", "trends", "alerts"}
+    assert r["headline"]["total_encounters"] == 0
+    # All sub-reports are always present.
+    assert set(r) >= {"headline", "activity", "trends", "diversity", "encounters", "alerts"}
 
 
 def test_site_report_headline_and_composition():
@@ -50,6 +51,9 @@ def test_site_report_headline_and_composition():
     assert r["trends"]["days_span"] == 3
     assert r["diversity"]["richness"] == 2
     assert r["alerts"]["window"] == "7d"
+    # Encounters folded in: 4 detections across distinct days/hours → honest visit count.
+    assert r["encounters"]["total_encounters"] == r["headline"]["total_encounters"]
+    assert r["headline"]["total_encounters"] >= 1
 
 
 def test_rising_subject_surfaces_in_headline():
