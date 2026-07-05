@@ -12,7 +12,7 @@ services:
       CLAWCAM_HOST: 0.0.0.0
       CLAWCAM_PORT: "8080"
     command: >
-      sh -c "pip install -e /app && pip install jsonschema && uvicorn clawcam_gateway.api.app:app --host 0.0.0.0 --port 8080"
+      sh -c "pip install -e /app && pip install jsonschema && uvicorn --factory clawcam_gateway.api.app:app_factory --host 0.0.0.0 --port 8080"
     ports:
       - "8080:8080"
 

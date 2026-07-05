@@ -33,14 +33,16 @@ class InferencePipeline:
         Set via config or env so tests can disable it without mocking.
     """
 
-    def __init__(self, db, detector: Optional[BaseDetector] = None, enabled: bool = True):
+    def __init__(self, db, detector: Optional[BaseDetector] = None, enabled: bool = True,
+                 weights_path=None):
         self._db = db
         self._detector = detector
         self._enabled = enabled
+        self._weights_path = weights_path
 
     def _get_detector(self) -> BaseDetector:
         if self._detector is None:
-            self._detector = get_detector()
+            self._detector = get_detector(weights_path=self._weights_path)
             log.info("inference: using detector %s %s",
                      self._detector.model_name, self._detector.model_version)
         return self._detector

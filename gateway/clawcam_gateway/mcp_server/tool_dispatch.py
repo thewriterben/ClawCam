@@ -162,5 +162,12 @@ def dispatch_tool(
         result = dispatch[name](**args)
     except TypeError as exc:
         result = {"ok": False, "error": f"invalid arguments for {name}: {exc}", "tool": name}
+    except (ValueError, KeyError) as exc:
+        # Argument coercion (int()/float()) and config-patch validation raise
+        # ValueError; previously these escaped as HTTP 500s and skipped the
+        # audit row entirely.
+        result = {"ok": False, "error": f"invalid argument value for {name}: {exc}", "tool": name}
+    except Exception as exc:  # noqa: BLE001 - dispatcher must never raise
+        result = {"ok": False, "error": f"{name} failed: {exc}", "tool": name}
     _audit(bool(result.get("ok", False)))
     return result

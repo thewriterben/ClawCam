@@ -138,22 +138,27 @@ class ScheduleEngine:
         ``starts_at``/``ends_at`` window are silently skipped without
         returning a result.
         """
+        from clawcam_gateway.timeutil import parse_ts
+
         now = now or datetime.now(timezone.utc)
         now_iso = now.isoformat()
         results: list[ScheduleRunResult] = []
 
         for schedule in self._db.list_schedules(enabled_only=True):
-            # Time-window gates
-            starts_at = schedule.get("starts_at")
-            ends_at = schedule.get("ends_at")
-            if starts_at and now_iso < starts_at:
+            # Time-window gates. Parse to datetimes: operator-supplied bounds
+            # may be date-only or space-separated, and string comparison
+            # misorders those against isoformat().
+            starts_at = parse_ts(schedule.get("starts_at"))
+            ends_at = parse_ts(schedule.get("ends_at"))
+            if starts_at and now < starts_at:
                 continue
-            if ends_at and now_iso > ends_at:
+            if ends_at and now > ends_at:
                 continue
 
-            next_run_at = schedule.get("next_run_at")
-            if next_run_at and now_iso < next_run_at:
+            next_run_at = parse_ts(schedule.get("next_run_at"))
+            if next_run_at and now < next_run_at:
                 continue
+            next_run_at = schedule.get("next_run_at")
             # If no next_run_at recorded yet AND a cron expr is set, compute
             # the next fire based on now and skip THIS tick (don't fire
             # immediately on first sight).
@@ -238,12 +243,19 @@ class ScheduleEngine:
             )
 
     def _action_set_state(self, sched_id: str, payload: dict[str, Any]) -> ScheduleRunResult:
+        from clawcam_gateway.profiles import is_valid_state
+
         device_id = payload.get("device_id")
         new_state = payload.get("state")
         if not device_id or not new_state:
             return ScheduleRunResult(
                 sched_id, status="failed", detail=payload,
                 error="set_state requires device_id and state",
+            )
+        if not is_valid_state(new_state):
+            return ScheduleRunResult(
+                sched_id, status="failed", detail=payload,
+                error=f"invalid state: {new_state}",
             )
         ok, prev = self._db.set_device_state(
             device_id, new_state,
@@ -257,8 +269,15 @@ class ScheduleEngine:
                                  detail={**payload, "previous_state": prev})
 
     def _action_set_deployment_state(self, sched_id: str, payload: dict[str, Any]) -> ScheduleRunResult:
+        from clawcam_gateway.profiles import is_valid_state
+
         deployment_id = payload.get("deployment_id", "default")
         new_state = payload.get("state")
+        if new_state and not is_valid_state(new_state):
+            return ScheduleRunResult(
+                sched_id, status="failed", detail=payload,
+                error=f"invalid state: {new_state}",
+            )
         if not new_state:
             return ScheduleRunResult(sched_id, status="failed", detail=payload,
                                      error="set_deployment_state requires state")

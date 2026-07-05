@@ -80,8 +80,10 @@ def get_auth_context(request: Request) -> AuthContext:
     if not record["enabled"]:
         raise HTTPException(status_code=403, detail="API key is revoked")
     if record.get("expires_at"):
-        now_iso = datetime.now(timezone.utc).isoformat()
-        if record["expires_at"] < now_iso:
+        from clawcam_gateway.timeutil import parse_ts
+        expires = parse_ts(record["expires_at"])
+        # Fail closed: an unparseable expiry must not grant a permanent key.
+        if expires is None or expires < datetime.now(timezone.utc):
             raise HTTPException(status_code=403, detail="API key has expired")
 
     # Best-effort last_used_at update — never blocks the request.

@@ -83,3 +83,37 @@ class CloudUploadWorker:
             logger.error("cloud upload failed for %s: %s", local_path.name, error)
             self.db.update_cloud_upload(upload_id, status="failed", error=error)
             return {"upload_id": upload_id, "status": "failed", "remote_uri": None, "error": error}
+
+    def retry_upload(self, upload: dict) -> dict:
+        """Re-attempt a failed upload, transitioning its EXISTING row.
+
+        Previously retries inserted a brand-new cloud_uploads row, so the
+        failed counter grew monotonically no matter how many retries
+        succeeded.
+        """
+        upload_id = upload["upload_id"]
+        local_path = Path(upload["media_path"])
+        event_id = upload.get("event_id")
+        name = local_path.name
+        remote_key = f"{event_id}/{name}" if event_id else name
+
+        if not local_path.exists():
+            error = f"local file not found: {local_path}"
+            self.db.update_cloud_upload(upload_id, status="failed", error=error)
+            return {"upload_id": upload_id, "status": "failed", "remote_uri": None, "error": error}
+        try:
+            self.db.update_cloud_upload(upload_id, status="pending")
+            remote_uri = self.store.upload(local_path, remote_key)
+            self.db.update_cloud_upload(
+                upload_id,
+                status="uploaded",
+                remote_uri=remote_uri,
+                uploaded_at=datetime.now(timezone.utc).isoformat(),
+            )
+            logger.info("cloud retry ok: %s → %s", name, remote_uri)
+            return {"upload_id": upload_id, "status": "uploaded", "remote_uri": remote_uri, "error": None}
+        except Exception as exc:  # noqa: BLE001 - worker must not crash caller
+            error = str(exc)
+            logger.error("cloud retry failed for %s: %s", name, error)
+            self.db.update_cloud_upload(upload_id, status="failed", error=error)
+            return {"upload_id": upload_id, "status": "failed", "remote_uri": None, "error": error}

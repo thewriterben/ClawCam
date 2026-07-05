@@ -57,16 +57,19 @@ def registered_device_with_event(app_and_db):
         "created_at": "2026-05-13T00:00:00Z",
         "last_seen_at": "2026-05-13T00:00:00Z",
     }})
-    client.post("/api/v1/events", json={"data": {
+    resp = client.post("/api/v1/events", json={"data": {
         "event_id": event_id,
         "event_type": "capture",
         "device_id": device_id,
         "timestamp": "2026-05-13T06:00:00Z",
         "time_source": "rtc",
         "source": "node",
-        "trigger": "pir_motion",
         "media": [],
     }})
+    # The old fixture silently posted a schema-invalid event ('trigger' is not
+    # allowed at the top level) and nothing downstream noticed because media
+    # upload accepted unknown events. Fail fast now.
+    assert resp.status_code == 200, resp.text
     return client, db, config, device_id, event_id
 
 
@@ -330,16 +333,17 @@ class TestMediaUploadEndpoint:
         assert saved.exists()
         assert saved.read_bytes() == content
 
-    def test_upload_unknown_event_still_saves(self, app_and_db):
-        """Uploading for an unknown event saves the file; inference may fail silently."""
+    def test_upload_unknown_event_404(self, app_and_db):
+        """Unknown events are rejected (parity with the audio upload path):
+        accepting them let arbitrary files into the media dir and through
+        inference/cloud sync for events that don't exist."""
         client, db, config = app_and_db
         content = b"\xff\xd8\xff\xe0" + b"\x00" * 16 + b"\xff\xd9"
         resp = client.post(
             "/api/v1/media/evt-unknown-999",
             files={"file": ("cap.jpg", io.BytesIO(content), "image/jpeg")},
         )
-        # Should not crash the server
-        assert resp.status_code == 200
+        assert resp.status_code == 404
 
 
 # ── Inference REST endpoints ──────────────────────────────────────────────────

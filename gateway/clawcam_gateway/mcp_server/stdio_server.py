@@ -470,7 +470,8 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "action_type": {
                     "type": "string",
                     "enum": ["set_state", "set_deployment_state",
-                             "enable_rule", "disable_rule", "webhook"],
+                             "enable_rule", "disable_rule", "webhook",
+                             "alert_digest", "daily_summary"],
                 },
                 "action_payload": {"type": "object"},
                 "cron_expr": {"type": "string",
