@@ -220,6 +220,11 @@ knobs are off/neutral by default, so existing deployments are unaffected.
 
 ## Detection Analytics — Species Activity Report
 
+> **See [`docs/ANALYTICS.md`](ANALYTICS.md)** for the complete analytics reference — every
+> report (activity, trends, diversity, encounters, comparison, calibration, anomaly, site,
+> fused detections, review queue) with its builder, MCP tool, REST endpoint, and the
+> question it answers, plus the pure-core design conventions and the detection dashboard.
+
 A pure, storage-agnostic roll-up of *when* each subject is active — the question a
 wildlife operator actually asks ("are the coyotes nocturnal at this site?").
 
