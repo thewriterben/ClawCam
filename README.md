@@ -110,4 +110,4 @@ ClawCam/
 
 For additional references on upcoming phases and detailed milestones, visit:
 - [Roadmap (docs/ROADMAP.md)](docs/ROADMAP.md)
-- [Status Details (docs/STATUS.md)](docs/STATUS.md
+- [Status Details (docs/STATUS.md)](docs/STATUS.md)

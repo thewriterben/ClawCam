@@ -38,4 +38,13 @@ importable instead of skipping.
 
 ## Pre-commit hooks
 
-This repo ship
+This repo ships a `.pre-commit-config.yaml` that mirrors CI: Ruff lint plus
+LF-line-ending and whitespace fixers (paired with `.gitattributes` to keep the
+tree LF-only). Enable it once after cloning:
+
+```
+pip install pre-commit
+pre-commit install
+```
+
+Run against the whole tree at any time with `pre-commit run --all-files`.

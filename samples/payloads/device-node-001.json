@@ -35,4 +35,6 @@
   },
   "metadata": {
     "profile": "phase1-simulator",
-    "notes": "Representative dev
+    "notes": "Representative device payload for ClawCam Phase 1 vertical slice."
+  }
+}
