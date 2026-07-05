@@ -145,7 +145,7 @@ function tools(m){
   const by = (m.tool_calls&&m.tool_calls.by_tool)||[];
   const rows = by.map(t=>{
     const errs = t.errors||0;
-    const avg = t.avg_latency_ms!=null ? Math.round(t.avg_latency_ms)+" ms" : "—";
+    const avg = t.avg_duration_ms!=null ? Math.round(t.avg_duration_ms)+" ms" : "—";
     return `<tr><td>${esc(t.tool_name||t.tool||"?")}</td>
       <td class="num">${t.calls??0}</td>
       <td class="num ${errs>0?'pill-bad':''}">${errs}</td>

@@ -37,7 +37,7 @@ def build_diversity_report(detections: list[dict[str, Any]]) -> dict[str, Any]:
     richness = len(counts)
     shannon = 0.0
     simpson = 0.0
-    species = []
+    species: list[dict[str, Any]] = []
     for subject, count in counts.items():
         p = count / total if total else 0.0
         if p > 0:

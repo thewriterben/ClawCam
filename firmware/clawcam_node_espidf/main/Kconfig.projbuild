@@ -1,0 +1,42 @@
+menu "ClawCam Node"
+
+config CLAWCAM_PIR_GPIO
+    int "PIR motion sensor GPIO (-1 to disable)"
+    default -1
+    range -1 48
+    help
+        GPIO connected to the PIR sensor output, used for EXT0 deep-sleep
+        wake. Set to -1 on boards without a PIR sensor. NOTE: the
+        ESP32-S3-EYE has no built-in PIR, and its GPIO 13 is the camera
+        PCLK pin — never route a PIR there. When disabled (-1) the node
+        wakes on timer only.
+
+config CLAWCAM_WIFI_ENABLED
+    bool "Connect to Wi-Fi at boot"
+    default n
+    help
+        Bring up the Wi-Fi station interface at boot. Required for the
+        gateway upload path (HTTP/MQTT/OTA); without it every network
+        call fails and the SD card remains the only artifact store.
+
+config CLAWCAM_WIFI_SSID
+    string "Wi-Fi SSID"
+    default ""
+    depends on CLAWCAM_WIFI_ENABLED
+
+config CLAWCAM_WIFI_PASSWORD
+    string "Wi-Fi password (WPA2-PSK; empty for open networks)"
+    default ""
+    depends on CLAWCAM_WIFI_ENABLED
+
+config CLAWCAM_WIFI_CONNECT_TIMEOUT_MS
+    int "Wi-Fi connect timeout (ms)"
+    default 10000
+    range 1000 60000
+    depends on CLAWCAM_WIFI_ENABLED
+    help
+        How long to wait for an IP before continuing the wake cycle
+        offline. Uploads are skipped when the connection fails; SD
+        artifacts remain the source of truth.
+
+endmenu

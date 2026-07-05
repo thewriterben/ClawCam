@@ -249,10 +249,18 @@ class MegaDetectorV5(BaseDetector):
 def get_detector(weights_path: Optional[Path] = None) -> BaseDetector:
     """Return the best available detector.
 
-    Prefers MegaDetectorV5 when weights are present; falls back to MockDetector
-    so the gateway always has a working inference path during development.
+    Prefers MegaDetectorV5 when weights are present. Falls back to
+    MockDetector only when ``CLAWCAM_ALLOW_MOCKS`` is set (demos / CI):
+    mock detections persist as real rows and can fire real alert webhooks,
+    so a model-less production gateway should skip inference instead of
+    fabricating it. When neither is usable the (unavailable) MegaDetector
+    instance is returned; callers must check ``is_available``.
     """
+    from clawcam_gateway.config import mocks_allowed
+
     md = MegaDetectorV5(weights_path=weights_path)
     if md.is_available:
         return md
-    return MockDetector()
+    if mocks_allowed():
+        return MockDetector()
+    return md

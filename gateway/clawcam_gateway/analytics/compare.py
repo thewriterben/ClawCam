@@ -64,7 +64,7 @@ def build_comparison_report(
     new_subjects = sorted(cur_subjects - prev_subjects)
     dropped_subjects = sorted(prev_subjects - cur_subjects)
 
-    per_subject = []
+    per_subject: list[dict[str, Any]] = []
     for subject in sorted(cur_subjects | prev_subjects):
         c = cur_counts.get(subject, 0)
         p = prev_counts.get(subject, 0)

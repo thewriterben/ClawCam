@@ -80,7 +80,10 @@ class ProfileDefaults:
 
     profile: str
     description: str
-    default_detectors: tuple[str, ...] = ("mock_detector",)
+    # Note: mock_detector is deliberately absent from all default chains.
+    # It fabricates detections and may only enter a chain by explicit
+    # operator override (or CLAWCAM_ALLOW_MOCKS for the fallback pipeline).
+    default_detectors: tuple[str, ...] = ("megadetector_v5",)
     audio_enabled: bool = False
     default_capture_interval_s: int | None = None
     capture_continuous: bool = False
@@ -110,7 +113,7 @@ _PROFILE_DEFAULTS: dict[str, ProfileDefaults] = {
     PROFILE_WILDLIFE: ProfileDefaults(
         profile=PROFILE_WILDLIFE,
         description="PIR-triggered trail camera for wildlife monitoring.",
-        default_detectors=("megadetector_v5", "mock_detector"),
+        default_detectors=("megadetector_v5",),
         default_capture_interval_s=300,  # 5-minute wake cycle as a fallback
         notes={"trigger": "pir", "field_deployable": True},
     ),
@@ -160,7 +163,7 @@ _PROFILE_DEFAULTS: dict[str, ProfileDefaults] = {
     PROFILE_APIARY: ProfileDefaults(
         profile=PROFILE_APIARY,
         description="Beehive activity, wasp intrusion, and swarm detection.",
-        default_detectors=("mock_detector",),  # placeholder — needs apiary model
+        default_detectors=("megadetector_v5",),  # coarse animal gate — needs apiary model
         audio_enabled=True,
         default_capture_interval_s=300,
         notes={"close_up": True, "warns_swarms": True},

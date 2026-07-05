@@ -41,12 +41,22 @@ class DetectorRegistry:
 
     def __init__(self):
         self._factories: Dict[str, DetectorFactory] = {}
+        self._instances: Dict[str, BaseDetector] = {}
 
     def register(self, name: str, factory: DetectorFactory) -> None:
         self._factories[name] = factory
+        self._instances.pop(name, None)
 
     def resolve(self, name: str) -> BaseDetector | None:
-        """Return a fresh detector instance, or None if unavailable / unknown."""
+        """Return a cached detector instance, or None if unavailable / unknown.
+
+        Instances are cached per name: heavy models (YOLO weights, easyocr
+        readers, face enrollments) load once per process instead of once per
+        uploaded image. ``register`` and ``set_registry`` reset the cache.
+        """
+        cached = self._instances.get(name)
+        if cached is not None:
+            return cached if cached.is_available else None
         factory = self._factories.get(name)
         if factory is None:
             return None
@@ -56,7 +66,9 @@ class DetectorRegistry:
             logger.debug("detector factory %r raised: %s", name, exc)
             return None
         if not instance.is_available:
+            # Not cached: availability can change (weights installed later).
             return None
+        self._instances[name] = instance
         return instance
 
     def names(self) -> list[str]:
@@ -81,8 +93,11 @@ def _default_registry() -> DetectorRegistry:
     registry.register("mock_detector", lambda: MockDetector())
 
     def _megadetector():
+        import os
+        from pathlib import Path as _Path
         from clawcam_gateway.inference.detector import MegaDetectorV5
-        return MegaDetectorV5()
+        weights_env = os.environ.get("CLAWCAM_INFERENCE_WEIGHTS")
+        return MegaDetectorV5(weights_path=_Path(weights_env) if weights_env else None)
 
     registry.register("megadetector_v5", _megadetector)
 
@@ -105,14 +120,20 @@ def _default_registry() -> DetectorRegistry:
         return PlateOCRDetector()
     registry.register("plate_ocr", _plate_ocr)
 
-    # Audio classifiers also opt in here so the orchestrator can chain
-    # them across modalities in a future phase.
+    # Audio classifier names are registered so profile chains may mention
+    # them, but they resolve as unavailable in the *visual* orchestrator:
+    # audio is scored by the audio pipeline (Phase 11), and the previous
+    # MockDetector placeholders fabricated visual detections from thin air.
     def _audio_birdnet():
-        return MockDetector()  # placeholder visual no-op
+        raise NotImplementedError(
+            "audio_birdnet is handled by the audio pipeline, not the visual orchestrator"
+        )
     registry.register("audio_birdnet", _audio_birdnet)
 
     def _audio_glassbreak():
-        return MockDetector()
+        raise NotImplementedError(
+            "audio_glassbreak is handled by the audio pipeline, not the visual orchestrator"
+        )
     registry.register("audio_glassbreak", _audio_glassbreak)
 
     return registry

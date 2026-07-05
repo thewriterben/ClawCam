@@ -131,7 +131,14 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base, int32_t event_i
 static esp_mqtt_client_handle_t create_client(const clawcam_mqtt_config_t *cfg, mqtt_ctx_t *ctx)
 {
     char broker_uri[256];
-    snprintf(broker_uri, sizeof(broker_uri), "%s:%d", cfg->broker_url, cfg->port);
+    /* Only append the port when the URL doesn't already carry one. */
+    const char *after_scheme = strstr(cfg->broker_url, "://");
+    const char *host_part = after_scheme ? after_scheme + 3 : cfg->broker_url;
+    if (strchr(host_part, ':') != NULL) {
+        snprintf(broker_uri, sizeof(broker_uri), "%s", cfg->broker_url);
+    } else {
+        snprintf(broker_uri, sizeof(broker_uri), "%s:%d", cfg->broker_url, cfg->port);
+    }
 
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri       = broker_uri,
@@ -184,16 +191,23 @@ esp_err_t clawcam_mqtt_publish_event(const clawcam_mqtt_config_t *cfg,
     /* Publish the event */
     char events_topic[128];
     make_topic(events_topic, sizeof(events_topic), CLAWCAM_MQTT_TOPIC_EVENTS, cfg->device_id);
+    esp_err_t publish_result = ESP_OK;
     int msg_id = esp_mqtt_client_publish(client, events_topic, event_json, 0,
                                           CONFIG_CLAWCAM_MQTT_QOS_EVENTS, 0);
     if (msg_id < 0) {
         ESP_LOGW(TAG, "event publish failed");
+        publish_result = ESP_FAIL;
     } else {
         ESP_LOGI(TAG, "event published to %s (msg_id=%d)", events_topic, msg_id);
-        /* Wait for PUBACk if QoS 1 */
+        /* Wait for PUBACK if QoS >= 1; without it the publish is unconfirmed
+         * and the caller must fall back to HTTP instead of assuming success. */
         if (CONFIG_CLAWCAM_MQTT_QOS_EVENTS >= 1) {
-            xEventGroupWaitBits(ctx.events, MQTT_PUBLISHED_BIT,
-                                pdFALSE, pdFALSE, pdMS_TO_TICKS(4000));
+            EventBits_t pub_bits = xEventGroupWaitBits(ctx.events, MQTT_PUBLISHED_BIT,
+                                                       pdFALSE, pdFALSE, pdMS_TO_TICKS(4000));
+            if (!(pub_bits & MQTT_PUBLISHED_BIT)) {
+                ESP_LOGW(TAG, "no PUBACK within 4s; treating publish as failed");
+                publish_result = ESP_ERR_TIMEOUT;
+            }
         }
     }
 
@@ -204,7 +218,7 @@ esp_err_t clawcam_mqtt_publish_event(const clawcam_mqtt_config_t *cfg,
     esp_mqtt_client_stop(client);
     esp_mqtt_client_destroy(client);
     vEventGroupDelete(ctx.events);
-    return ESP_OK;
+    return publish_result;
 }
 
 esp_err_t clawcam_mqtt_publish_health(const clawcam_mqtt_config_t *cfg,
@@ -254,8 +268,10 @@ esp_err_t clawcam_mqtt_publish_event(const clawcam_mqtt_config_t *cfg,
     (void)event_json; (void)command_cb; (void)node_config;
     char topic[128];
     make_topic(topic, sizeof(topic), CLAWCAM_MQTT_TOPIC_EVENTS, cfg->device_id);
-    ESP_LOGI(TAG, "MQTT stub: would publish event to %s", topic);
-    return ESP_OK;
+    /* NOT_SUPPORTED (not ESP_OK): returning success here made main.c count a
+     * no-op as an upload and skip the HTTP fallback entirely. */
+    ESP_LOGI(TAG, "MQTT stub: would publish event to %s; falling back to HTTP", topic);
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 esp_err_t clawcam_mqtt_publish_health(const clawcam_mqtt_config_t *cfg,
@@ -265,7 +281,7 @@ esp_err_t clawcam_mqtt_publish_health(const clawcam_mqtt_config_t *cfg,
     char topic[128];
     make_topic(topic, sizeof(topic), CLAWCAM_MQTT_TOPIC_HEALTH, cfg->device_id);
     ESP_LOGI(TAG, "MQTT stub: would publish health to %s", topic);
-    return ESP_OK;
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 #endif /* CONFIG_CLAWCAM_GATEWAY_UPLOAD_ENABLED && CLAWCAM_HAVE_MQTT_CLIENT */

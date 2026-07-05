@@ -55,8 +55,9 @@ def build_calibration_report(
         }
 
     nb = max(1, int(buckets))
-    bins = [{"lo": round(i / nb, 3), "hi": round((i + 1) / nb, 3),
-             "n": 0, "confirmed": 0, "rejected": 0} for i in range(nb)]
+    bins: list[dict[str, Any]] = [
+        {"lo": round(i / nb, 3), "hi": round((i + 1) / nb, 3),
+         "n": 0, "confirmed": 0, "rejected": 0} for i in range(nb)]
     for conf, is_pos in labeled:
         idx = min(nb - 1, int(conf * nb))  # 1.0 lands in the top bin
         b = bins[idx]

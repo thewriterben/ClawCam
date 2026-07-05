@@ -64,11 +64,11 @@ The first gateway tools should be small, auditable, and useful to the brain.
 | Tool | Purpose |
 |---|---|
 | `get_recent_detections` | Return recent detection/event summaries. |
-| `get_detection` | Return one detection with metadata and media references. |
+| `get_inference_results` | Return detection results for an event with metadata. |
 | `get_node_health` | Return battery, storage, last seen, and error state. |
 | `capture_now` | Request a manual capture from a reachable node. |
 | `generate_daily_summary` | Create a structured summary from stored events. |
-| `list_review_tasks` | Return AI classifications needing human review. |
+| `get_review_queue` | Return AI classifications needing human review, priority-scored. |
 
 ## Safety Model
 

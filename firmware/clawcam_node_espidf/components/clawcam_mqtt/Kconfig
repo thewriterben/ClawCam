@@ -1,0 +1,26 @@
+menu "ClawCam MQTT"
+
+config CLAWCAM_MQTT_BROKER_URL
+    string "MQTT broker URL"
+    default "mqtt://192.168.4.1"
+    help
+        Broker the node publishes events/health to. May include a port
+        (e.g. mqtt://192.168.4.1:1883); otherwise CLAWCAM_MQTT_PORT is
+        appended. Matches the gateway's MQTT bridge.
+
+config CLAWCAM_MQTT_PORT
+    int "MQTT broker port"
+    default 1883
+    range 1 65535
+
+config CLAWCAM_MQTT_KEEPALIVE
+    int "MQTT keepalive (seconds)"
+    default 15
+    range 5 300
+
+config CLAWCAM_MQTT_QOS_EVENTS
+    int "QoS for event publishes"
+    default 1
+    range 0 2
+
+endmenu

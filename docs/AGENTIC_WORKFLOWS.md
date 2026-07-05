@@ -16,13 +16,13 @@ ClawCam uses agents to make field operations easier, but agents do not replace r
 
 | Category | Examples | Approval Requirement |
 |---|---|---|
-| Read-only | `get_recent_detections`, `get_node_health`, `get_gateway_health` | No approval by default. |
-| Analysis | `generate_daily_summary`, `get_species_counts`, `list_review_tasks` | No approval by default. |
+| Read-only | `get_recent_detections`, `get_node_health`, `get_gateway_metrics` | No approval by default. |
+| Analysis | `generate_daily_summary`, `list_species_detections`, `get_review_queue` | No approval by default. |
 | Capture | `capture_now`, `request_diagnostic_image` | Approval recommended unless local operator enables automatic mode. |
 | Configuration | `set_capture_interval`, `set_motion_sensitivity`, `set_power_profile` | Approval required. |
 | Destructive | `delete_media`, `purge_database`, `factory_reset_node` | Approval always required. |
-| Publication | `sync_cloud`, `export_public_dataset`, `publish_location` | Approval always required. |
-| Firmware | `ota_update_node`, `rollback_firmware` | Approval always required. |
+| Publication | `get_cloud_sync_status` (read) plus future `export_public_dataset`, `publish_location` | Approval always required. |
+| Firmware | `queue_firmware_update`, future `rollback_firmware` | Approval always required. |
 
 ## First Skills
 

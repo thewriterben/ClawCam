@@ -43,9 +43,18 @@ def test_classify_safe_when_unavailable(tmp_path):
     assert c.classify(tmp_path / "clip.wav") == []
 
 
-def test_default_classifier_is_mock_in_ci():
-    # No real audio models installed in CI -> deterministic mock.
+def test_default_classifier_is_mock_when_allowed(monkeypatch):
+    # No real audio models installed in CI -> deterministic mock, but only
+    # when mocks are explicitly allowed (they fabricate classifications).
+    monkeypatch.setenv("CLAWCAM_ALLOW_MOCKS", "true")
     assert isinstance(get_default_classifier(), MockAudioClassifier)
+
+
+def test_default_classifier_unavailable_without_mock_optin(monkeypatch):
+    monkeypatch.delenv("CLAWCAM_ALLOW_MOCKS", raising=False)
+    c = get_default_classifier()
+    assert not isinstance(c, MockAudioClassifier)
+    assert c.is_available is False
 
 
 # ── CompositeAudioClassifier ─────────────────────────────────────────────────

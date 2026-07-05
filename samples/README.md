@@ -7,8 +7,8 @@ This directory contains deterministic Phase 1 sample payloads for gateway, schem
 | Directory | Purpose |
 |---|---|
 | `payloads/` | Hand-authored example device, event, and health payloads. |
-| `node-simulator/` | Output location for generated simulator bundles. |
-| `media/` | Placeholder location for sample media references. |
+| `node-simulator/` *(generated)* | Created by the simulator CLI (`--output ../samples/node-simulator`); gitignored. |
+| `media/` *(placeholder)* | Referenced by sample payloads; no binary media is checked in. |
 | `firmware-bundle/` | SD-card-style firmware artifact fixture with `events/`, `media/`, and `metadata/`. |
 
 ## Generate Simulator Payloads

@@ -63,6 +63,11 @@ def test_orchestrator_skips_unavailable_plate_ocr(tmp_path):
     })
     img = tmp_path / "x.jpg"
     img.write_bytes(b"FAKEJPEG")
+    db.upsert_device({
+        "device_id": "cam-po", "device_type": "node", "name": "Plate Chain Test",
+        "status": "active", "created_at": "2026-05-15T00:00:00Z",
+        "last_seen_at": "2026-05-15T00:00:00Z",
+    })
     db.set_device_detector_chain("cam-po", ["mock_detector", "plate_ocr"])
     orch = InferenceOrchestrator(db=db)
     stored = [s for s in orch.run("evt-po", str(img), device_id="cam-po") if s.get("stored")]

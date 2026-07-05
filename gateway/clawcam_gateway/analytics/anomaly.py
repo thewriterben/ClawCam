@@ -69,17 +69,17 @@ def build_anomaly_report(
     var = sum((v - mean) ** 2 for v in values) / n  # population variance
     stdev = sqrt(var)
 
-    series = []
+    series: list[dict[str, Any]] = []
     anomalies = 0
-    for d in days:
-        c = counts[d]
+    for day_key in days:  # 'd' above is a detection dict; don't shadow it
+        c = counts[day_key]
         z = round((c - mean) / stdev, 2) if stdev > 0 else 0.0
         is_anom = stdev > 0 and n >= 2 and abs(z) >= z_threshold
         kind = "normal"
         if is_anom:
             anomalies += 1
             kind = "spike" if z > 0 else "drop"
-        series.append({"date": d, "count": c, "z": z, "anomaly": is_anom, "kind": kind})
+        series.append({"date": day_key, "count": c, "z": z, "anomaly": is_anom, "kind": kind})
 
     busiest = max(days, key=lambda d: counts[d])
     quietest = min(days, key=lambda d: counts[d])

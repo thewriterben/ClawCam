@@ -44,7 +44,8 @@ When `CONFIG_CLAWCAM_CAMERA_SMOKE_TEST_ON_BOOT=y`, the firmware should initializ
 | Metadata persistence | JSON metadata is saved under `/sdcard/metadata`. |
 | Event artifact | Gateway-compatible event JSON is saved under `/sdcard/events`. |
 | Optional upload | If enabled, firmware registers the node via `/api/v1/devices` and uploads the event via `/api/v1/events`. |
-| Next port | Add Wi-Fi provisioning so the upload path can run after a real network connection is established. |
+| Wi-Fi | Station bring-up is implemented behind `CONFIG_CLAWCAM_WIFI_ENABLED` (set `CLAWCAM_WIFI_SSID` / `CLAWCAM_WIFI_PASSWORD` in menuconfig). Without it, gateway upload/OTA/MQTT cannot reach the network. |
+| Next port | Field-validate Wi-Fi + upload on real hardware; add provisioning (softAP/BLE) for non-hardcoded credentials. |
 
 ## References
 
