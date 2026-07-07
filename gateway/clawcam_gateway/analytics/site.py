@@ -18,6 +18,7 @@ from typing import Any
 from clawcam_gateway.alerts.digest import build_alert_digest
 
 from .activity import build_activity_report
+from .cooccurrence import build_cooccurrence_report
 from .diversity import build_diversity_report
 from .encounters import build_encounter_report
 from .trends import build_trend_report
@@ -29,6 +30,7 @@ def build_site_report(
     tz_offset_hours: int = 0,
     digest_window_label: str = "",
     encounter_gap_minutes: int = 30,
+    cooccurrence_window_minutes: int = 60,
 ) -> dict[str, Any]:
     """Combine activity, trend, and alert-digest roll-ups into one site summary.
 
@@ -37,16 +39,22 @@ def build_site_report(
         alert_events:        Fired ``alert_events`` rows for the digest (optional).
         tz_offset_hours:     Local-time shift for the day/hour bucketing.
         digest_window_label: Human span the alert digest covers (e.g. ``"7d"``).
+        encounter_gap_minutes:      Gap that separates independent encounters.
+        cooccurrence_window_minutes: Time-window width for the co-occurrence pairing.
 
     Returns a report with a ``headline`` (totals + top subject + rising/falling subjects +
-    busiest day + alert counts) and the full ``activity``, ``trends``, and ``alerts``
-    sub-reports.
+    busiest day + richness/evenness + the strongest co-occurring pair + alert counts) and
+    the full ``activity``, ``trends``, ``diversity``, ``encounters``, ``cooccurrence``, and
+    ``alerts`` sub-reports.
     """
     alert_events = alert_events or []
     activity = build_activity_report(detections, tz_offset_hours=tz_offset_hours)
     trends = build_trend_report(detections, tz_offset_hours=tz_offset_hours)
     diversity = build_diversity_report(detections)
     encounters = build_encounter_report(detections, gap_minutes=encounter_gap_minutes)
+    cooccurrence = build_cooccurrence_report(
+        detections, window_minutes=cooccurrence_window_minutes, tz_offset_hours=tz_offset_hours
+    )
     alerts = build_alert_digest(alert_events, window_label=digest_window_label)
 
     top_subject = activity["species"][0]["subject"] if activity["species"] else None
@@ -69,6 +77,7 @@ def build_site_report(
         "busiest_day": busiest_day,
         "richness": diversity["richness"],
         "evenness": diversity["evenness"],
+        "top_cooccurrence": cooccurrence["strongest"],
         "total_alerts": alerts["total_alerts"],
         "alerts_suppressed": alerts["suppressed_total"],
     }
@@ -80,5 +89,6 @@ def build_site_report(
         "trends": trends,
         "diversity": diversity,
         "encounters": encounters,
+        "cooccurrence": cooccurrence,
         "alerts": alerts,
     }

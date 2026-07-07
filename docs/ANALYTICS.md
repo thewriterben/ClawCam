@@ -73,8 +73,9 @@ names the top pair.
 
 **Site** is the composition: one call returns a `headline` (total detections, total
 encounters, distinct subjects, top subject, rising/falling, busiest day, richness,
-evenness, alert counts) plus the full `activity`, `trends`, `diversity`, `encounters`, and
-`alerts` sub-reports. It is the single "what's happening here?" answer.
+evenness, the strongest co-occurring pair, alert counts) plus the full `activity`,
+`trends`, `diversity`, `encounters`, `cooccurrence`, and `alerts` sub-reports. It is the
+single "what's happening here?" answer.
 
 **Fused detections** (`get_fused_detections`) returns an event's consolidated detection
 set — localisation from the strongest box, the most specific label, and species carried
@@ -95,8 +96,8 @@ species lead; confident identified detections sink.
 
 The site report composes the individual builders, and `build_daily_site_section`
 (used by `generate_daily_summary`) composes the site report. So the daily summary
-automatically carries the day's activity, trends, diversity, encounters, and alert digest
-— add a metric to the site report and it flows to the daily summary for free. The
+automatically carries the day's activity, trends, diversity, encounters, co-occurrence, and
+alert digest — add a metric to the site report and it flows to the daily summary for free. The
 scheduler's `daily_summary` action delivers that whole picture to a webhook on a cron.
 
 ## Design conventions

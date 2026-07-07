@@ -23,7 +23,9 @@ def test_empty_site_report():
     assert r["headline"]["total_alerts"] == 0
     assert r["headline"]["total_encounters"] == 0
     # All sub-reports are always present.
-    assert set(r) >= {"headline", "activity", "trends", "diversity", "encounters", "alerts"}
+    assert set(r) >= {"headline", "activity", "trends", "diversity", "encounters",
+                      "cooccurrence", "alerts"}
+    assert r["headline"]["top_cooccurrence"] is None  # no pairs on empty data
 
 
 def test_site_report_headline_and_composition():
@@ -54,6 +56,22 @@ def test_site_report_headline_and_composition():
     # Encounters folded in: 4 detections across distinct days/hours → honest visit count.
     assert r["encounters"]["total_encounters"] == r["headline"]["total_encounters"]
     assert r["headline"]["total_encounters"] >= 1
+
+
+def test_cooccurrence_folds_into_site_report():
+    # deer and coyote share the same night-hour windows across two days → they co-occur.
+    dets = [
+        _det("deer", 11, hour=22), _det("coyote", 11, hour=22),
+        _det("deer", 12, hour=22), _det("coyote", 12, hour=22),
+    ]
+    r = build_site_report(dets, [])
+    strongest = r["headline"]["top_cooccurrence"]
+    assert strongest is not None
+    assert {strongest["a"], strongest["b"]} == {"deer", "coyote"}
+    assert strongest["jaccard"] == 1.0
+    # Full sub-report carried through, consistent with the headline.
+    assert r["cooccurrence"]["strongest"] == strongest
+    assert r["cooccurrence"]["pairs"][0]["shared_windows"] == 2
 
 
 def test_rising_subject_surfaces_in_headline():
