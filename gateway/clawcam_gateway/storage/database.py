@@ -692,11 +692,15 @@ class GatewayDatabase:
     def save_inference_result(
         self, event_id: str, media_path: str, result: Any,
         role: str = RESULT_ROLE_SINGLE,
+        ran_at: str | None = None,
     ) -> int:
         """Persist an InferenceResult (duck-typed) for an event.
 
-        Returns the new row's ``result_id`` so the orchestrator can later
-        demote chain members once a fused row is stored.
+        ``ran_at`` defaults to the DB clock (``datetime('now')``); pass an ISO
+        timestamp to backdate a row — used by the scenario loader to seed
+        historic detections spanning many days. Returns the new row's
+        ``result_id`` so the orchestrator can later demote chain members once a
+        fused row is stored.
         """
         d = result.to_dict()
         review_state = d.get("review_state", REVIEW_STATE_UNREVIEWED)
@@ -704,32 +708,34 @@ class GatewayDatabase:
             raise ValueError(f"invalid review_state: {review_state!r}")
         if role not in RESULT_ROLES:
             raise ValueError(f"invalid role: {role!r}; expected one of {sorted(RESULT_ROLES)}")
+        cols = ["event_id", "media_path", "model_name", "model_version",
+                "detections_json", "top_label", "top_confidence", "top_species",
+                "review_state", "deployment_id", "role"]
         with self.connect() as conn:
             ev = conn.execute(
                 "SELECT deployment_id FROM events WHERE event_id = ?", (event_id,)
             ).fetchone()
             deployment_id = ev["deployment_id"] if ev else "default"
+            values: list[Any] = [
+                event_id,
+                media_path,
+                d["model_name"],
+                d["model_version"],
+                json.dumps(d["detections"], sort_keys=True),
+                d.get("top_label"),
+                d.get("top_confidence"),
+                d.get("top_species"),
+                review_state,
+                deployment_id,
+                role,
+            ]
+            if ran_at is not None:
+                cols.append("ran_at")
+                values.append(ran_at)
+            placeholders = ", ".join("?" for _ in cols)
             cur = conn.execute(
-                """
-                INSERT INTO inference_results
-                    (event_id, media_path, model_name, model_version,
-                     detections_json, top_label, top_confidence, top_species,
-                     review_state, deployment_id, role)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event_id,
-                    media_path,
-                    d["model_name"],
-                    d["model_version"],
-                    json.dumps(d["detections"], sort_keys=True),
-                    d.get("top_label"),
-                    d.get("top_confidence"),
-                    d.get("top_species"),
-                    review_state,
-                    deployment_id,
-                    role,
-                ),
+                f"INSERT INTO inference_results ({', '.join(cols)}) VALUES ({placeholders})",
+                values,
             )
             return int(cur.lastrowid or 0)
 
