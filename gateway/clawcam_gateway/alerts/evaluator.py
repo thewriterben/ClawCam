@@ -32,7 +32,7 @@ class AlertEvaluator:
 
     def __init__(self, db: "GatewayDatabase", default_webhook: str | None = None,
                  allow_private_hosts: bool = False, dedup_window_s: int = 0,
-                 min_severity: str = "info"):
+                 min_severity: str = "info", zone_min_coverage: float | None = None):
         self._db = db
         self._default_webhook = default_webhook or ""
         self._allow_private_hosts = allow_private_hosts
@@ -41,6 +41,10 @@ class AlertEvaluator:
         # recorded regardless).
         self._dedup_window_s = int(dedup_window_s or 0)
         self._min_severity = min_severity or "info"
+        # Zone matching: None → center-point (default); 0–1 → require that fraction of a
+        # detection's bbox to fall inside a zone before its action applies (robust for
+        # subjects that straddle a zone edge).
+        self._zone_min_coverage = zone_min_coverage
 
     def evaluate(self, event_id: str, device_id: str | None = None) -> int:
         """Check all enabled rules against the inference result for *event_id*.
@@ -77,7 +81,9 @@ class AlertEvaluator:
                 )
                 if zones:
                     from clawcam_gateway.zones import apply_zones_to_result
-                    result, alerts_blocked = apply_zones_to_result(result, zones)
+                    result, alerts_blocked = apply_zones_to_result(
+                        result, zones, min_coverage=self._zone_min_coverage,
+                    )
                     if alerts_blocked:
                         # Every surviving detection is in a record-only zone.
                         return 0

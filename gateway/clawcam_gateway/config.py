@@ -56,6 +56,11 @@ class GatewayConfig:
     # ("info"/"warning"/"critical"). Below it, the alert is still recorded — webhook is
     # skipped. Default "info" = deliver everything.
     alert_min_severity: str = "info"
+    # Detection-zone matching mode. None → center-point (a detection belongs to a zone if
+    # its bbox center is inside). 0–1 → require that fraction of the bbox area to fall in
+    # the zone (robust for large subjects that straddle a zone edge). Default None keeps
+    # the original behavior.
+    alert_zone_min_coverage: float | None = None
     # Authentication and multi-tenancy (Phase 7)
     auth_enabled: bool = False           # off by default; existing deployments unaffected
     default_deployment_id: str = "default"
@@ -95,6 +100,11 @@ class GatewayConfig:
             webhook_allow_private_hosts=os.getenv("CLAWCAM_WEBHOOK_ALLOW_PRIVATE_HOSTS", "").lower() in ("1", "true", "yes"),
             alert_dedup_window_s=int(os.getenv("CLAWCAM_ALERT_DEDUP_WINDOW_S", "0")),
             alert_min_severity=os.getenv("CLAWCAM_ALERT_MIN_SEVERITY", "info").strip().lower() or "info",
+            alert_zone_min_coverage=(
+                float(os.environ["CLAWCAM_ALERT_ZONE_MIN_COVERAGE"])
+                if os.getenv("CLAWCAM_ALERT_ZONE_MIN_COVERAGE")
+                else None
+            ),
             auth_enabled=os.getenv("CLAWCAM_AUTH_ENABLED", "false").lower() == "true",
             default_deployment_id=os.getenv("CLAWCAM_DEFAULT_DEPLOYMENT", "default"),
             scheduler_enabled=os.getenv("CLAWCAM_SCHEDULER_ENABLED", "false").lower() == "true",

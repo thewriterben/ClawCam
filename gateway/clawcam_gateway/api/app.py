@@ -144,7 +144,8 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     alert_evaluator = AlertEvaluator(db=db, default_webhook=config.alert_webhook_url,
                                      allow_private_hosts=config.webhook_allow_private_hosts,
                                      dedup_window_s=config.alert_dedup_window_s,
-                                     min_severity=config.alert_min_severity)
+                                     min_severity=config.alert_min_severity,
+                                     zone_min_coverage=config.alert_zone_min_coverage)
     schedule_engine = ScheduleEngine(db=db, allow_private_hosts=config.webhook_allow_private_hosts,
                                      tick_interval_s=config.scheduler_tick_interval_s)
     audio_pipeline = AudioPipeline(db=db, enabled=config.audio_enabled)
