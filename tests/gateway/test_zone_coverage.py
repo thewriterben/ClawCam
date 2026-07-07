@@ -2,7 +2,12 @@
 
 import pytest
 
-from clawcam_gateway.zones.geometry import bbox_polygon_coverage, zone_for_bbox_coverage
+from clawcam_gateway.zones.geometry import (
+    apply_zones_to_result,
+    bbox_polygon_coverage,
+    zone_for_bbox,
+    zone_for_bbox_coverage,
+)
 
 # A unit square covering the left half of the frame: x in [0, 0.5], y in [0, 1].
 LEFT_HALF = [[0.0, 0.0], [0.5, 0.0], [0.5, 1.0], [0.0, 1.0]]
@@ -53,3 +58,29 @@ def test_coverage_matcher_respects_priority_and_enabled():
     bbox = [0.1, 0.1, 0.4, 0.9]  # fully inside `inner`
     z = zone_for_bbox_coverage(bbox, zones, min_coverage=0.5)
     assert z["zone_id"] == "high"  # lowest priority number among enabled wins; disabled skipped
+
+
+# ── apply_zones_to_result opt-in coverage mode ───────────────────────────────
+
+_IGNORE_LEFT = [{"zone_id": "z", "polygon": LEFT_HALF, "action": "ignore", "priority": 1}]
+
+
+def _result(bbox):
+    return {"detections": [{"label": "animal", "confidence": 0.9, "bbox": bbox}]}
+
+
+def test_apply_default_is_center_and_keeps_edge_straddler():
+    # center x = 0.55 is outside the ignore zone → default (center) mode keeps it.
+    out, _ = apply_zones_to_result(_result([0.35, 0.2, 0.75, 0.8]), _IGNORE_LEFT)
+    assert len(out["detections"]) == 1
+
+
+def test_apply_coverage_mode_drops_edge_straddler():
+    # ~37% overlap >= 0.3 → routed into the ignore zone → dropped.
+    out, _ = apply_zones_to_result(_result([0.35, 0.2, 0.75, 0.8]), _IGNORE_LEFT, min_coverage=0.3)
+    assert out["detections"] == []
+
+
+def test_apply_coverage_threshold_too_high_keeps():
+    out, _ = apply_zones_to_result(_result([0.35, 0.2, 0.75, 0.8]), _IGNORE_LEFT, min_coverage=0.6)
+    assert len(out["detections"]) == 1

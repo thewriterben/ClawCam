@@ -181,8 +181,16 @@ def zone_for_bbox_coverage(
 def apply_zones_to_result(
     inference_result: dict[str, Any],
     zones: list[dict[str, Any]],
+    min_coverage: float | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Filter an inference result by zone actions.
+
+    Zone membership defaults to the **center-point** test (:func:`zone_for_bbox`).
+    Pass ``min_coverage`` (0–1) to switch to **area-coverage** matching
+    (:func:`zone_for_bbox_coverage`) instead — a detection is assigned to the first
+    priority-ordered zone whose polygon covers at least that fraction of its bbox.
+    Coverage matching is more robust for large subjects that straddle a zone edge;
+    the default (``None``) preserves the original center-point behavior exactly.
 
     Walks each detection in ``inference_result["detections"]``, looks up
     its zone (if any), and:
@@ -215,7 +223,11 @@ def apply_zones_to_result(
             kept.append(det)
             any_alert_eligible = True
             continue
-        zone = zone_for_bbox(bbox, zones)
+        zone = (
+            zone_for_bbox_coverage(bbox, zones, min_coverage=min_coverage)
+            if min_coverage is not None
+            else zone_for_bbox(bbox, zones)
+        )
         if zone is None:
             kept.append(det)
             any_alert_eligible = True
