@@ -616,6 +616,43 @@ def get_anomaly_report(
     }
 
 
+def get_cooccurrence_report(
+    context: ToolContext,
+    limit: int = 5000,
+    window_minutes: int = 60,
+    tz_offset_hours: int = 0,
+    min_shared: int = 1,
+    deployment_id: str | None = None,
+) -> dict[str, Any]:
+    """Score which species use the site at the same times (co-occurrence).
+
+    Bins detections into ``window_minutes`` windows and, for each species pair, reports the
+    window Jaccard (how often they coincide) and Schoener's activity overlap (how aligned
+    their daily rhythms are). High on both suggests genuine co-use (predator/prey, shared
+    resource); high overlap but low Jaccard suggests same schedule with avoidance. Answers
+    "which animals show up together here?".
+
+    Arguments
+    ---------
+    limit:           Max detections to scan (1–50000, default 5000).
+    window_minutes:  Co-occurrence bin width in minutes (default 60).
+    tz_offset_hours: Shift UTC to local time for the hour-of-day overlap.
+    min_shared:      Drop pairs sharing fewer than this many windows (default 1).
+    deployment_id:   Restrict to one deployment (optional).
+    """
+    from clawcam_gateway.analytics.cooccurrence import build_cooccurrence_report
+
+    safe_limit = max(1, min(int(limit), 50_000))
+    dets = context.db.list_inference_results(limit=safe_limit, deployment_id=deployment_id)
+    return {
+        "ok": True,
+        "report": build_cooccurrence_report(
+            dets, window_minutes=int(window_minutes),
+            tz_offset_hours=int(tz_offset_hours), min_shared=int(min_shared),
+        ),
+    }
+
+
 def get_review_queue(
     context: ToolContext,
     limit: int = 50,

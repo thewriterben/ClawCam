@@ -244,6 +244,23 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_cooccurrence_report",
+        "description": "Score which species use the site at the same times: detections are binned into time windows, and each species pair gets a window Jaccard (how often they coincide) plus Schoener's activity overlap (how aligned their daily rhythms are). High on both suggests co-use (predator/prey, shared resource); high overlap with low Jaccard suggests same schedule with avoidance. Answers 'which animals show up together here?'. Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50000, "default": 5000},
+                "window_minutes": {"type": "integer", "minimum": 1, "default": 60,
+                                   "description": "Co-occurrence bin width in minutes."},
+                "tz_offset_hours": {"type": "integer", "default": 0,
+                                    "description": "Shift UTC to local time for the hour-of-day overlap."},
+                "min_shared": {"type": "integer", "minimum": 0, "default": 1,
+                               "description": "Drop pairs sharing fewer than this many windows."},
+                "deployment_id": {"type": "string", "description": "Restrict to one deployment (optional)."},
+            },
+        },
+    },
+    {
         "name": "get_calibration_report",
         "description": "Confidence calibration from human review: uses reviewed detections (verified/corrected = real, rejected = false positive) to check whether higher confidence means higher correctness, and recommends an auto-accept threshold meeting a target precision. Answers 'can I trust confidence >= X, and what should X be?'. Read-only.",
         "inputSchema": {

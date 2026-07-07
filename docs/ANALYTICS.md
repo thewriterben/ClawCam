@@ -18,6 +18,7 @@ about.
 | Comparison | `build_comparison_report` | `get_comparison_report` | `GET /api/v1/analytics/comparison` | *How does this week compare to last?* |
 | Calibration | `build_calibration_report` | `get_calibration_report` | `GET /api/v1/analytics/calibration` | *Can I trust the model's confidence, and at what threshold?* |
 | Anomaly | `build_anomaly_report` | `get_anomaly_report` | `GET /api/v1/analytics/anomalies` | *Was any day unusually busy or quiet?* |
+| Co-occurrence | `build_cooccurrence_report` | `get_cooccurrence_report` | `GET /api/v1/analytics/cooccurrence` | *Which species use the site at the same times?* |
 | Site | `build_site_report` | `get_site_report` | `GET /api/v1/analytics/site` | *What's happening at this site?* (composes the above) |
 | Fused detections | `inference/boxops.py` | `get_fused_detections` | — (MCP only) | *What is actually in this capture?* (merge a detector chain) |
 | Review queue | `inference/triage.py` | `get_review_queue` | — (MCP only) | *What should a human review first?* |
@@ -60,6 +61,15 @@ rows, it returns a clear "nothing to calibrate on" message.
 days beyond `z_threshold` (default 2.0) as `spike` (a surge) or `drop` (a suspicious quiet
 — a knocked camera, an obstruction). A flat series or fewer than two days yields no
 false anomalies.
+
+**Co-occurrence** asks which species use the site at the *same* times. Detections are
+binned into `window_minutes` windows; for each species pair it reports the window Jaccard
+(shared windows over either-present windows — how often they coincide) and Schoener's
+activity overlap (`1 − ½·Σ|pₐ−p_b|` over the two hour-of-day distributions — how aligned
+their daily rhythms are). High on both suggests genuine co-use (predator–prey, shared
+resource); high overlap with low Jaccard suggests the same schedule with temporal
+avoidance. Pairs sharing fewer than `min_shared` windows are dropped, and `strongest`
+names the top pair.
 
 **Site** is the composition: one call returns a `headline` (total detections, total
 encounters, distinct subjects, top subject, rising/falling, busiest day, richness,
@@ -151,6 +161,7 @@ python -m pytest ../tests/gateway -q
 
 The pure analytics tests (`test_activity_report.py`, `test_trend_report.py`,
 `test_diversity_report.py`, `test_encounter_report.py`, `test_comparison_report.py`,
-`test_calibration_report.py`, `test_anomaly_report.py`, `test_site_report.py`,
+`test_calibration_report.py`, `test_anomaly_report.py`, `test_cooccurrence_report.py`,
+`test_site_report.py`,
 `test_boxops.py`, `test_triage.py`) import only their builder module and need no runtime
 dependencies; the tool- and API-level tests exercise the DB and FastAPI paths.

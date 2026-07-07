@@ -8,6 +8,7 @@ from .activity import build_activity_report
 from .anomaly import build_anomaly_report
 from .calibration import build_calibration_report
 from .compare import build_comparison_report
+from .cooccurrence import build_cooccurrence_report
 from .daily import build_daily_site_section
 from .diversity import build_diversity_report
 from .encounters import build_encounter_report
@@ -19,6 +20,7 @@ __all__ = [
     "build_anomaly_report",
     "build_calibration_report",
     "build_comparison_report",
+    "build_cooccurrence_report",
     "build_daily_site_section",
     "build_diversity_report",
     "build_encounter_report",
