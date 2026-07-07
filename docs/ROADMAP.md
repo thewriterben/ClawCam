@@ -117,11 +117,26 @@ Executed as one coordinated phase with Oh-Ben-Claw (see `NEXT_PHASE_PLAN.md` in 
 | MQTT on device           | Node publishes events and receives pushed commands over a real broker.                                        | 🔲 Planned    |
 | OTA on device            | Firmware update downloaded, SHA256-verified, and flashed on physical hardware.                                | 🔲 Planned    |
 
+## Phase 15: Geospatial Foundation (Planned — Conservation Grid G0)
+
+The ClawCam half of the ecosystem "Conservation Grid" G0 unlock (full strategy: `Oh-Ben-Claw/docs/CONSERVATION-GRID-STRATEGY.md`). Today lat/lon and environment fields exist only in the JSON-schema contract and die in `payload_json`; this promotes them to queryable, joinable, exportable data and adds a real site model. The ENU⇄geodetic coordinate conversion is defined once in Oh-Ben-Claw and consumed here — ClawCam does not fork its own geometry.
+
+| Deliverable              | Acceptance Criteria                                                                                          | Status        |
+|--------------------------|--------------------------------------------------------------------------------------------------------------|---------------|
+| Geo columns              | Promote `latitude`/`longitude`/`altitude_m` from `payload_json` to real, indexed columns on `devices` and `events`; migration backfills existing rows; no loss of the JSON blob. | 🔲 Planned    |
+| `sites` table            | First-class `sites(site_id, boundary_polygon, origin_lat, origin_lon, dem_ref, …)`; `deployment_id → site_id` link (fills the `DATA_MODEL.md` "location/covariates" gap). | 🔲 Planned    |
+| Geo queries              | Bounding-box and within-polygon detection/event queries; geo columns added to `events.csv` / `detections.csv` export and the export MCP tool. | 🔲 Planned    |
+| Coordinate contract      | Consume the shared Oh-Ben-Claw ENU⇄`(lat,lon)` conversion + `site` schema; round-trip test proving a detection's `(lat,lon)` ↔ site-local ENU is stable. | 🔲 Planned    |
+| Quick win                | Ship the geo/environment column promotion first (data already arrives in `payload_json`) — unblocks dormant signal before the optimizer (OBC G1) exists. | 🔲 Planned    |
+
+> Note: the **grid coverage optimizer** and **camera-onto-mesh bridge** (Conservation Grid G1/G2) are owned by Oh-Ben-Claw (`ROADMAP.md` → Conservation Grid track). ClawCam Phase 15 is the data-layer prerequisite both depend on.
+
 ## Detailed Timeline
 - **Phase 0**: Completed
 - **Phases 1–2**: Completed (Q2 2026)
 - **Phases 3–12**: Completed (Q2 2026)
 - **Phase 13 (Production Hardening)**: June 8 – July 31, 2026 (lockstep with Oh-Ben-Claw Phase 15) — code-complete; default protocol flip scheduled for Jul 28, 2026
 - **Phase 14 (Hardware Integration)**: Target Q3–Q4 2026
+- **Phase 15 (Geospatial Foundation — Conservation Grid G0)**: Planned; geo/environment column promotion is the quick-win first step
 
 ---
