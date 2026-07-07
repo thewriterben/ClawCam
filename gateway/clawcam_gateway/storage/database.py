@@ -442,6 +442,24 @@ class GatewayDatabase:
                 """
             )
 
+            # Conservation Grid G0: a first-class survey-area site model, and a
+            # deployment→site link so detections can be scoped to an area.
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sites (
+                    site_id TEXT PRIMARY KEY,
+                    name TEXT,
+                    boundary_json TEXT,
+                    origin_lat REAL,
+                    origin_lon REAL,
+                    dem_ref TEXT,
+                    metadata_json TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+            self._add_column_if_missing(conn, "deployments", "site_id", "TEXT")
+
     @staticmethod
     def _add_column_if_missing(conn, table: str, column: str, column_def: str) -> None:
         """SQLite has no IF NOT EXISTS for ALTER TABLE — emulate it."""
@@ -629,6 +647,116 @@ class GatewayDatabase:
                 params,
             ).fetchall()
         return [json.loads(row["payload_json"]) for row in rows]
+
+    # ── Sites (Conservation Grid G0) ──────────────────────────────────────
+
+    def upsert_site(self, payload: dict[str, Any]) -> None:
+        """Create or update a survey-area site.
+
+        ``payload``: ``{site_id, name?, boundary?, origin_lat?, origin_lon?,
+        dem_ref?, metadata?}`` where ``boundary`` is a list of ``[lat, lon]``
+        points. If origin is omitted it defaults to the boundary centroid.
+        """
+        boundary = payload.get("boundary") or []
+        origin_lat = payload.get("origin_lat")
+        origin_lon = payload.get("origin_lon")
+        if (origin_lat is None or origin_lon is None) and boundary:
+            origin_lat = sum(p[0] for p in boundary) / len(boundary)
+            origin_lon = sum(p[1] for p in boundary) / len(boundary)
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO sites (site_id, name, boundary_json, origin_lat, origin_lon, dem_ref, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(site_id) DO UPDATE SET
+                    name = excluded.name,
+                    boundary_json = excluded.boundary_json,
+                    origin_lat = excluded.origin_lat,
+                    origin_lon = excluded.origin_lon,
+                    dem_ref = excluded.dem_ref,
+                    metadata_json = excluded.metadata_json
+                """,
+                (
+                    payload["site_id"],
+                    payload.get("name"),
+                    json.dumps(boundary),
+                    origin_lat,
+                    origin_lon,
+                    payload.get("dem_ref"),
+                    json.dumps(payload.get("metadata") or {}),
+                ),
+            )
+
+    @staticmethod
+    def _site_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "site_id": row["site_id"],
+            "name": row["name"],
+            "boundary": json.loads(row["boundary_json"]) if row["boundary_json"] else [],
+            "origin_lat": row["origin_lat"],
+            "origin_lon": row["origin_lon"],
+            "dem_ref": row["dem_ref"],
+            "metadata": json.loads(row["metadata_json"]) if row["metadata_json"] else {},
+            "created_at": row["created_at"],
+        }
+
+    def get_site(self, site_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM sites WHERE site_id = ?", (site_id,)).fetchone()
+        return self._site_row(row) if row else None
+
+    def list_sites(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM sites ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [self._site_row(r) for r in rows]
+
+    def set_deployment_site(self, deployment_id: str, site_id: str | None) -> None:
+        """Link (or unlink) a deployment to a site."""
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE deployments SET site_id = ? WHERE deployment_id = ?",
+                (site_id, deployment_id),
+            )
+
+    def site_for_deployment(self, deployment_id: str) -> str | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT site_id FROM deployments WHERE deployment_id = ?", (deployment_id,)
+            ).fetchone()
+        return row["site_id"] if row and row["site_id"] else None
+
+    def events_in_site(
+        self, site_id: str, limit: int = 1000, deployment_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return events whose location falls inside a site's boundary polygon.
+
+        Uses the indexed bbox as a coarse prefilter, then an exact point-in-polygon
+        test (reusing the zones ray-casting helper). Returns ``[]`` if the site is
+        unknown or has no boundary.
+        """
+        from clawcam_gateway.zones.geometry import point_in_polygon
+
+        site = self.get_site(site_id)
+        if not site or not site["boundary"]:
+            return []
+        boundary = site["boundary"]
+        lats = [p[0] for p in boundary]
+        lons = [p[1] for p in boundary]
+        candidates = self.events_in_bbox(
+            min(lats), min(lons), max(lats), max(lons),
+            limit=limit, deployment_id=deployment_id,
+        )
+        hits = []
+        for ev in candidates:
+            loc = ev.get("location") or {}
+            lat, lon = loc.get("latitude"), loc.get("longitude")
+            if lat is None or lon is None:
+                continue
+            if point_in_polygon((lat, lon), boundary):
+                hits.append(ev)
+        return hits
 
     def get_device(self, device_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
