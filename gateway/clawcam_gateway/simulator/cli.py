@@ -79,6 +79,10 @@ def _run_scenario(args: argparse.Namespace) -> None:
     )
     stream = build_detection_stream(spec)
     db = GatewayDatabase(args.db)
+    if args.clear:
+        cleared = db.clear_deployment_detections(args.deployment_id)
+        print(f"cleared deployment {args.deployment_id!r}: "
+              f"{cleared['inference_results']} detections, {cleared['events']} events")
     counts = load_stream_into_db(
         db, stream,
         device_name=args.name,
@@ -118,6 +122,10 @@ def main(argv: list[str] | None = None) -> None:
     p_scn.add_argument(
         "--reviewed-frac", type=float, default=0.0, dest="reviewed_frac",
         help="Fraction (0..1) of rows to label with review states for calibration demos.",
+    )
+    p_scn.add_argument(
+        "--clear", action="store_true",
+        help="Delete the deployment's existing detection data before loading (repeatable demos).",
     )
 
     args = parser.parse_args(argv)

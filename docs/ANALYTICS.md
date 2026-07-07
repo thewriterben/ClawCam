@@ -117,6 +117,27 @@ cards, a trends panel, diversity + calibration, a daily-volume bar chart with an
 highlighted, and per-subject hour-of-day activity histograms. Configure the gateway URL,
 token, and TZ offset in the header; it persists them and auto-refreshes.
 
+## Populating demo data
+
+To see the reports and dashboard on realistic data without a camera or a running node,
+seed a database with the scenario simulator. `simulator/scenario.py` generates a
+deterministic multi-day detection stream — per-species diel activity (nocturnal / diurnal
+/ crepuscular / cathemeral), Poisson daily counts, and optional injected spike/drop days —
+and `simulator/loader.py` persists it, backdating each `inference_results` row to its own
+`ran_at` so the historic series is real. The `scenario` CLI subcommand does both:
+
+```
+cd gateway
+python -m clawcam_gateway.simulator.cli scenario --db field.db --days 14 \
+    --species "white-tailed deer:8:crepuscular" --species "red fox:4:nocturnal" \
+    --spike-days 9 --reviewed-frac 0.3 --clear
+```
+
+`--reviewed-frac` deterministically labels a slice of rows verified/rejected (higher
+confidence → more likely verified) so the calibration and review-queue tools have ground
+truth; `--clear` wipes the deployment's existing detection rows first for repeatable runs.
+Point the gateway (and the dashboard) at that DB and every report is populated.
+
 ## Running the tests
 
 All from the `gateway/` directory with the venv active (see `gateway/pyproject.toml` for

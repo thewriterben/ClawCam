@@ -497,6 +497,25 @@ class GatewayDatabase:
                 ),
             )
 
+    def clear_deployment_detections(self, deployment_id: str) -> dict[str, int]:
+        """Delete the detection-related rows for a deployment. Returns row counts.
+
+        Scoped to ``devices``, ``events``, ``media``, ``inference_results`` and
+        ``health_records`` for the given ``deployment_id`` — enough to give a
+        clean slate for re-seeding demo/scenario data without touching other
+        deployments or unrelated tables (schedules, alerts, api_keys, …). Note
+        this is distinct from :meth:`delete_deployment`, which removes the
+        deployment's *registration* row from the ``deployments`` table.
+        """
+        counts: dict[str, int] = {}
+        with self.connect() as conn:
+            for table in ("inference_results", "media", "events", "health_records", "devices"):
+                cur = conn.execute(
+                    f"DELETE FROM {table} WHERE deployment_id = ?", (deployment_id,)
+                )
+                counts[table] = cur.rowcount
+        return counts
+
     def deployment_for_device(self, device_id: str) -> str | None:
         """Return the deployment_id column for a device, or None if absent."""
         with self.connect() as conn:

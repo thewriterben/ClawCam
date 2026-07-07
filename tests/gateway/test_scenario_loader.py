@@ -90,6 +90,25 @@ def test_real_db_roundtrip_is_analytics_visible(tmp_path):
     assert all(r["top_species"] == "deer" for r in rows)
 
 
+def test_clear_deployment_gives_a_clean_slate(tmp_path):
+    from clawcam_gateway.storage.database import GatewayDatabase
+
+    db = GatewayDatabase(str(tmp_path / "sim.db"))
+    stream = _stream()
+    load_stream_into_db(db, stream)
+    assert len(db.list_inference_results(limit=10_000)) == len(stream)
+
+    dep = stream[0]["deployment_id"]
+    cleared = db.clear_deployment_detections(dep)
+    assert cleared["inference_results"] == len(stream)
+    assert cleared["events"] == len(stream)
+    assert db.list_inference_results(limit=10_000) == []
+
+    # Re-seeding after a clear does not double up.
+    load_stream_into_db(db, stream)
+    assert len(db.list_inference_results(limit=10_000)) == len(stream)
+
+
 def test_real_db_stream_feeds_anomaly_report(tmp_path):
     from clawcam_gateway.storage.database import GatewayDatabase
     from clawcam_gateway.analytics.anomaly import build_anomaly_report
