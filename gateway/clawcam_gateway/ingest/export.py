@@ -31,6 +31,9 @@ EVENTS_COLUMNS = [
     "timestamp",
     "time_source",
     "source",
+    "latitude",
+    "longitude",
+    "altitude_m",
     "media_count",
     "trigger",
 ]
@@ -42,6 +45,7 @@ def events_to_csv(events: list[dict]) -> str:
     writer = csv.DictWriter(buf, fieldnames=EVENTS_COLUMNS, extrasaction="ignore", lineterminator="\n")
     writer.writeheader()
     for event in events:
+        loc = event.get("location") or {}
         row = {
             "event_id": event.get("event_id", ""),
             "event_type": event.get("event_type", ""),
@@ -49,6 +53,9 @@ def events_to_csv(events: list[dict]) -> str:
             "timestamp": event.get("timestamp", ""),
             "time_source": event.get("time_source", ""),
             "source": event.get("source", ""),
+            "latitude": loc.get("latitude", ""),
+            "longitude": loc.get("longitude", ""),
+            "altitude_m": loc.get("altitude_m", ""),
             "media_count": len(event.get("media", [])),
             "trigger": event.get("metadata", {}).get("trigger", ""),
         }

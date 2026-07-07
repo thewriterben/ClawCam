@@ -410,6 +410,38 @@ class GatewayDatabase:
                 "ON inference_results(role)"
             )
 
+            # Conservation Grid G0: promote geo + environment out of the opaque
+            # payload_json blob into real, queryable columns. Existing rows are
+            # backfilled from the JSON below (COALESCE keeps any value already
+            # promoted; the WHERE clause only touches not-yet-filled rows).
+            self._add_column_if_missing(conn, "events", "latitude", "REAL")
+            self._add_column_if_missing(conn, "events", "longitude", "REAL")
+            self._add_column_if_missing(conn, "events", "altitude_m", "REAL")
+            self._add_column_if_missing(conn, "health_records", "temperature_c", "REAL")
+            self._add_column_if_missing(conn, "health_records", "humidity_percent", "REAL")
+            self._add_column_if_missing(conn, "health_records", "pressure_hpa", "REAL")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_events_latlon ON events(latitude, longitude)"
+            )
+            conn.execute(
+                """
+                UPDATE events SET
+                    latitude   = COALESCE(latitude,   json_extract(payload_json, '$.location.latitude')),
+                    longitude  = COALESCE(longitude,  json_extract(payload_json, '$.location.longitude')),
+                    altitude_m = COALESCE(altitude_m, json_extract(payload_json, '$.location.altitude_m'))
+                WHERE latitude IS NULL OR longitude IS NULL OR altitude_m IS NULL
+                """
+            )
+            conn.execute(
+                """
+                UPDATE health_records SET
+                    temperature_c    = COALESCE(temperature_c,    json_extract(payload_json, '$.environment.temperature_c')),
+                    humidity_percent = COALESCE(humidity_percent, json_extract(payload_json, '$.environment.humidity_percent')),
+                    pressure_hpa     = COALESCE(pressure_hpa,     json_extract(payload_json, '$.environment.pressure_hpa'))
+                WHERE temperature_c IS NULL OR humidity_percent IS NULL OR pressure_hpa IS NULL
+                """
+            )
+
     @staticmethod
     def _add_column_if_missing(conn, table: str, column: str, column_def: str) -> None:
         """SQLite has no IF NOT EXISTS for ALTER TABLE — emulate it."""
@@ -444,11 +476,14 @@ class GatewayDatabase:
             )
 
     def add_event(self, payload: dict[str, Any]) -> None:
+        loc = payload.get("location") or {}
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO events (event_id, event_type, device_id, timestamp, source, payload_json, deployment_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO events
+                    (event_id, event_type, device_id, timestamp, source, payload_json,
+                     deployment_id, latitude, longitude, altitude_m)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload["event_id"],
@@ -458,6 +493,9 @@ class GatewayDatabase:
                     payload["source"],
                     json.dumps(payload, sort_keys=True),
                     payload.get("deployment_id", "default"),
+                    loc.get("latitude"),
+                    loc.get("longitude"),
+                    loc.get("altitude_m"),
                 ),
             )
             for media in payload.get("media", []):
@@ -482,11 +520,14 @@ class GatewayDatabase:
                 )
 
     def add_health(self, payload: dict[str, Any]) -> None:
+        env = payload.get("environment") or {}
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO health_records (device_id, timestamp, status, payload_json, deployment_id)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO health_records
+                    (device_id, timestamp, status, payload_json, deployment_id,
+                     temperature_c, humidity_percent, pressure_hpa)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload["device_id"],
@@ -494,6 +535,9 @@ class GatewayDatabase:
                     payload["status"],
                     json.dumps(payload, sort_keys=True),
                     payload.get("deployment_id", "default"),
+                    env.get("temperature_c"),
+                    env.get("humidity_percent"),
+                    env.get("pressure_hpa"),
                 ),
             )
 
@@ -553,6 +597,37 @@ class GatewayDatabase:
                     "SELECT payload_json FROM events WHERE deployment_id = ? ORDER BY timestamp DESC LIMIT ?",
                     (deployment_id, limit),
                 ).fetchall()
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def events_in_bbox(
+        self,
+        min_lat: float,
+        min_lon: float,
+        max_lat: float,
+        max_lon: float,
+        limit: int = 1000,
+        deployment_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return events whose promoted ``(latitude, longitude)`` fall inside a bbox.
+
+        Uses the real geo columns (Conservation Grid G0), so this is an indexed
+        query rather than a JSON scan. Events with no location are excluded.
+        """
+        clauses = [
+            "latitude IS NOT NULL", "longitude IS NOT NULL",
+            "latitude BETWEEN ? AND ?", "longitude BETWEEN ? AND ?",
+        ]
+        params: list[Any] = [min_lat, max_lat, min_lon, max_lon]
+        if deployment_id is not None:
+            clauses.append("deployment_id = ?")
+            params.append(deployment_id)
+        params.append(limit)
+        where = " AND ".join(clauses)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"SELECT payload_json FROM events WHERE {where} ORDER BY timestamp DESC LIMIT ?",
+                params,
+            ).fetchall()
         return [json.loads(row["payload_json"]) for row in rows]
 
     def get_device(self, device_id: str) -> dict[str, Any] | None:

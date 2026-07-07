@@ -123,11 +123,12 @@ The ClawCam half of the ecosystem "Conservation Grid" G0 unlock (full strategy: 
 
 | Deliverable              | Acceptance Criteria                                                                                          | Status        |
 |--------------------------|--------------------------------------------------------------------------------------------------------------|---------------|
-| Geo columns              | Promote `latitude`/`longitude`/`altitude_m` from `payload_json` to real, indexed columns on `devices` and `events`; migration backfills existing rows; no loss of the JSON blob. | 🔲 Planned    |
+| Geo + environment columns | Promote `latitude`/`longitude`/`altitude_m` to real columns on `events` and `temperature_c`/`humidity_percent`/`pressure_hpa` on `health_records`; populated on insert; migration backfills legacy rows from `payload_json` via `json_extract`; JSON blob preserved. | ✅ **Done** — `add_event`/`add_health` populate; idempotent backfill in `migrate()`; indexed `(latitude, longitude)`; 7 tests in `tests/gateway/test_geo_columns.py`. |
+| Geo queries + export     | Indexed bounding-box event query; geo columns in the events CSV export. | ✅ **Done** — `events_in_bbox()`; `events_to_csv` gains `latitude`/`longitude`/`altitude_m`. |
 | `sites` table            | First-class `sites(site_id, boundary_polygon, origin_lat, origin_lon, dem_ref, …)`; `deployment_id → site_id` link (fills the `DATA_MODEL.md` "location/covariates" gap). | 🔲 Planned    |
-| Geo queries              | Bounding-box and within-polygon detection/event queries; geo columns added to `events.csv` / `detections.csv` export and the export MCP tool. | 🔲 Planned    |
+| Within-polygon query + MCP | Point-in-polygon event/detection query and a geo REST/MCP surface (beyond bbox). | 🔲 Planned    |
 | Coordinate contract      | Consume the shared Oh-Ben-Claw ENU⇄`(lat,lon)` conversion + `site` schema; round-trip test proving a detection's `(lat,lon)` ↔ site-local ENU is stable. | 🔲 Planned    |
-| Quick win                | Ship the geo/environment column promotion first (data already arrives in `payload_json`) — unblocks dormant signal before the optimizer (OBC G1) exists. | 🔲 Planned    |
+| Quick win                | Ship the geo/environment column promotion first (data already arrives in `payload_json`) — unblocks dormant signal before the optimizer (OBC G1) exists. | ✅ **Done** (this is the geo+environment columns row above). |
 
 > Note: the **grid coverage optimizer** and **camera-onto-mesh bridge** (Conservation Grid G1/G2) are owned by Oh-Ben-Claw (`ROADMAP.md` → Conservation Grid track). ClawCam Phase 15 is the data-layer prerequisite both depend on.
 
