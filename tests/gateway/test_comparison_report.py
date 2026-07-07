@@ -65,3 +65,37 @@ def test_richness_delta():
     assert r["richness_current"] == 3
     assert r["richness_previous"] == 1
     assert r["richness_delta"] == 2
+
+
+def _det_at(species, hour):
+    return {"top_species": species, "top_label": species,
+            "top_confidence": 0.9, "ran_at": f"2026-05-02T{hour:02d}:00:00+00:00"}
+
+
+def test_timing_shift_detected_when_activity_moves():
+    # Same species, same count — but previous was daytime, now it's nocturnal.
+    prev = [_det_at("deer", h) for h in (10, 11, 12, 13)]
+    cur = [_det_at("deer", h) for h in (0, 1, 2, 3)]
+    r = build_comparison_report(cur, prev)
+    assert [s["subject"] for s in r["timing_shifts"]] == ["deer"]
+    deer = next(s for s in r["by_subject"] if s["subject"] == "deer")
+    assert deer["activity_overlap"] == 0.0  # day vs night → no overlap
+    assert "timing shift: deer" in r["headline"]
+
+
+def test_no_timing_shift_when_activity_stable():
+    prev = [_det_at("deer", h) for h in (10, 11, 12, 13)]
+    cur = [_det_at("deer", h) for h in (10, 11, 12, 13)]
+    r = build_comparison_report(cur, prev)
+    assert r["timing_shifts"] == []
+    deer = next(s for s in r["by_subject"] if s["subject"] == "deer")
+    assert deer["activity_overlap"] == 1.0  # identical timing
+
+
+def test_activity_overlap_none_when_not_in_both_windows():
+    r = build_comparison_report([_det_at("fox", 3)], [_det_at("deer", 3)])
+    fox = next(s for s in r["by_subject"] if s["subject"] == "fox")
+    deer = next(s for s in r["by_subject"] if s["subject"] == "deer")
+    assert fox["activity_overlap"] is None      # only in current
+    assert deer["activity_overlap"] is None     # only in previous
+    assert r["timing_shifts"] == []

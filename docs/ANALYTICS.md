@@ -48,8 +48,12 @@ honest "how many visits?" number instead of "how many frames?".
 **Comparison** takes a current window and the equal window before it and returns totals +
 percent change, newly-present (`new_subjects`) vs vanished (`dropped_subjects`) subjects,
 per-subject deltas sorted by magnitude, a richness delta, and whether the dominant subject
-changed. The `get_comparison_report` tool splits a single fetch into the two windows by
-`window_days`.
+changed. Each subject present in both windows also carries an `activity_overlap` — the
+Schoener overlap of its hour-of-day distribution between the two windows — and subjects
+whose overlap drops below `shift_threshold` are surfaced as `timing_shifts`, catching a
+species that changed *when* it uses the site (e.g. going nocturnal under disturbance) even
+when its count held steady. The `get_comparison_report` tool splits a single fetch into the
+two windows by `window_days`.
 
 **Calibration** uses human review as ground truth (`verified`/`corrected` = real hit,
 `rejected` = false positive) to measure whether higher confidence means higher correctness

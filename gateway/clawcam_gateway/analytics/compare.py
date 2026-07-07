@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .activity import build_activity_report
 from .diversity import build_diversity_report
 
 
@@ -22,6 +23,14 @@ def _counts(detections: list[dict[str, Any]]) -> dict[str, int]:
         subject = d.get("top_species") or d.get("top_label") or "unknown"
         counts[subject] = counts.get(subject, 0) + 1
     return counts
+
+
+def _overlap(a_hourly: list[int], b_hourly: list[int]) -> float:
+    """Schoener's overlap of two hour-of-day histograms (0..1); 1.0 = identical timing."""
+    sa, sb = sum(a_hourly), sum(b_hourly)
+    if sa == 0 or sb == 0:
+        return 0.0
+    return round(1.0 - 0.5 * sum(abs(a_hourly[h] / sa - b_hourly[h] / sb) for h in range(24)), 3)
 
 
 def _pct_change(current: float, previous: float) -> float | None:
@@ -40,6 +49,8 @@ def build_comparison_report(
     previous: list[dict[str, Any]],
     current_label: str = "current",
     previous_label: str = "previous",
+    tz_offset_hours: int = 0,
+    shift_threshold: float = 0.5,
 ) -> dict[str, Any]:
     """Compare a current detection window against a previous one.
 
@@ -48,11 +59,16 @@ def build_comparison_report(
         previous:       Detection rows for the previous (baseline) window.
         current_label:  Human name for the current window (e.g. ``"this week"``).
         previous_label: Human name for the baseline window (e.g. ``"last week"``).
+        tz_offset_hours: Local-time shift for the hour-of-day activity comparison.
+        shift_threshold: A subject present in both windows is a ``timing_shift`` when its
+                         between-window activity overlap falls below this (default 0.5).
 
     Returns totals + percent change, the set of ``new_subjects`` (present now, absent
     before) and ``dropped_subjects`` (present before, absent now), per-subject count
-    deltas sorted by magnitude, a richness delta, whether the dominant subject changed,
-    and a one-line ``headline``.
+    deltas sorted by magnitude, each also carrying an ``activity_overlap`` (how much its
+    daily timing held between windows, or ``None`` if not in both), a ``timing_shifts``
+    list of subjects whose timing moved, a richness delta, whether the dominant subject
+    changed, and a one-line ``headline``.
     """
     cur_counts = _counts(current)
     prev_counts = _counts(previous)
@@ -64,10 +80,22 @@ def build_comparison_report(
     new_subjects = sorted(cur_subjects - prev_subjects)
     dropped_subjects = sorted(prev_subjects - cur_subjects)
 
+    # Per-subject hour-of-day histograms in each window, for timing-shift detection.
+    cur_hourly = {s["subject"]: s["hourly"]
+                  for s in build_activity_report(current, tz_offset_hours=tz_offset_hours)["species"]}
+    prev_hourly = {s["subject"]: s["hourly"]
+                   for s in build_activity_report(previous, tz_offset_hours=tz_offset_hours)["species"]}
+
     per_subject: list[dict[str, Any]] = []
+    timing_shifts: list[dict[str, Any]] = []
     for subject in sorted(cur_subjects | prev_subjects):
         c = cur_counts.get(subject, 0)
         p = prev_counts.get(subject, 0)
+        overlap = None
+        if subject in cur_hourly and subject in prev_hourly:
+            overlap = _overlap(cur_hourly[subject], prev_hourly[subject])
+            if overlap < shift_threshold:
+                timing_shifts.append({"subject": subject, "activity_overlap": overlap})
         per_subject.append(
             {
                 "subject": subject,
@@ -76,9 +104,11 @@ def build_comparison_report(
                 "delta": c - p,
                 "pct_change": _pct_change(c, p),
                 "direction": _direction(c - p),
+                "activity_overlap": overlap,
             }
         )
     per_subject.sort(key=lambda s: abs(s["delta"]), reverse=True)
+    timing_shifts.sort(key=lambda s: s["activity_overlap"])
 
     cur_div = build_diversity_report(current)
     prev_div = build_diversity_report(previous)
@@ -98,6 +128,10 @@ def build_comparison_report(
         headline_bits.append(
             f"dominant {prev_div['dominant_subject']}→{cur_div['dominant_subject']}"
         )
+    if timing_shifts:
+        headline_bits.append(
+            "timing shift: " + ", ".join(s["subject"] for s in timing_shifts)
+        )
 
     return {
         "current_label": current_label,
@@ -115,5 +149,6 @@ def build_comparison_report(
         "dominant_changed": dominant_changed,
         "dominant_current": cur_div["dominant_subject"],
         "dominant_previous": prev_div["dominant_subject"],
+        "timing_shifts": timing_shifts,
         "by_subject": per_subject,
     }
