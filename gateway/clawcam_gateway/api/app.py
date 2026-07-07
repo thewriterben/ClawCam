@@ -1297,6 +1297,21 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             ),
         }
 
+    @app.get("/api/v1/analytics/species")
+    def species_profile_endpoint(
+        subject: str,
+        limit: int = 5000,
+        tz_offset_hours: int = 0,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Single-species drill-down: abundance, diel, trend, encounters, co-occurring."""
+        from clawcam_gateway.analytics.species import build_species_profile
+
+        safe_limit = max(1, min(int(limit), 50_000))
+        dets = db.list_inference_results(limit=safe_limit, deployment_id=_deployment_scope(auth))
+        return {"ok": True, "report": build_species_profile(
+            dets, subject, tz_offset_hours=int(tz_offset_hours))}
+
     # ── Data export (Phase 5) ────────────────────────────────────────────
 
     @app.get("/api/v1/export/events.csv")

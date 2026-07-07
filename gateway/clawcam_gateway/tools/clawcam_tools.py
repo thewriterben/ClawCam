@@ -686,6 +686,35 @@ def get_abundance_report(
     }
 
 
+def get_species_profile(
+    context: ToolContext,
+    subject: str,
+    limit: int = 5000,
+    tz_offset_hours: int = 0,
+    deployment_id: str | None = None,
+) -> dict[str, Any]:
+    """Drill-down profile for a single species: everything about one subject here.
+
+    Composes the analytics suite for one ``subject`` — its abundance (RAI), diel pattern
+    and peak hour, trend, independent-encounter count, first/last seen, share of all
+    detections, and the species it most often appears alongside. Answers "tell me about
+    the coyotes here".
+
+    Arguments
+    ---------
+    subject:         Species/label to profile (required).
+    limit:           Max detections to scan (1–50000, default 5000).
+    tz_offset_hours: Shift UTC to local time for activity/abundance bucketing.
+    deployment_id:   Restrict to one deployment (optional).
+    """
+    from clawcam_gateway.analytics.species import build_species_profile
+
+    safe_limit = max(1, min(int(limit), 50_000))
+    dets = context.db.list_inference_results(limit=safe_limit, deployment_id=deployment_id)
+    return {"ok": True, "report": build_species_profile(
+        dets, subject, tz_offset_hours=int(tz_offset_hours))}
+
+
 def get_review_queue(
     context: ToolContext,
     limit: int = 50,

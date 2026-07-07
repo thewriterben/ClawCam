@@ -276,6 +276,21 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_species_profile",
+        "description": "Drill-down profile for a single species: composes the analytics suite for one subject — its abundance (RAI), diel pattern and peak hour, trend, independent-encounter count, first/last seen, share of all detections, and the species it most often appears alongside. Answers 'tell me about the coyotes here'. Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "subject": {"type": "string", "description": "Species/label to profile (required)."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50000, "default": 5000},
+                "tz_offset_hours": {"type": "integer", "default": 0,
+                                    "description": "Shift UTC to local time for bucketing."},
+                "deployment_id": {"type": "string", "description": "Restrict to one deployment (optional)."},
+            },
+            "required": ["subject"],
+        },
+    },
+    {
         "name": "get_calibration_report",
         "description": "Confidence calibration from human review: uses reviewed detections (verified/corrected = real, rejected = false positive) to check whether higher confidence means higher correctness, and recommends an auto-accept threshold meeting a target precision. Answers 'can I trust confidence >= X, and what should X be?'. Read-only.",
         "inputSchema": {

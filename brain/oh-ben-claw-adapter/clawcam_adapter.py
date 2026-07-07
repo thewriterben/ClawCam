@@ -137,6 +137,7 @@ class ToolPolicy:
         "get_anomaly_report",
         "get_cooccurrence_report",
         "get_abundance_report",
+        "get_species_profile",
         "get_fused_detections",
         "get_review_queue",
         "list_species_detections",

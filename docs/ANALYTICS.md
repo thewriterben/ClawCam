@@ -23,6 +23,7 @@ about.
 | Site | `build_site_report` | `get_site_report` | `GET /api/v1/analytics/site` | *What's happening at this site?* (composes the above) |
 | Fused detections | `inference/boxops.py` | `get_fused_detections` | — (MCP only) | *What is actually in this capture?* (merge a detector chain) |
 | Review queue | `inference/triage.py` | `get_review_queue` | — (MCP only) | *What should a human review first?* |
+| Species profile | `build_species_profile` | `get_species_profile` | `GET /api/v1/analytics/species` | *Tell me everything about **this** species here.* |
 
 Every report is **read-only** and **auto-approved** in the brain adapter — they observe,
 they never actuate.
@@ -102,6 +103,13 @@ the per-event chain view). The tool returns the stored fused row when present
 borderline-confidence hits, confident boxes with no species ID, and configured rare
 species lead; confident identified detections sink.
 
+**Species profile** (`get_species_profile`) is a single-subject drill-down that composes
+the suite for one species: its abundance (RAI), diel pattern and peak hour, trend,
+independent-encounter count, first/last seen, share of all detections, and the species it
+most often appears alongside (`top_cooccurring`). It answers "tell me about the coyotes
+here" in one call. It takes the full detection set so RAI effort and co-occurrence
+partners are computed against the whole survey, not just the subject's rows.
+
 ## Composition & propagation
 
 The site report composes the individual builders, and `build_daily_site_section`
@@ -173,6 +181,6 @@ python -m pytest ../tests/gateway -q
 The pure analytics tests (`test_activity_report.py`, `test_trend_report.py`,
 `test_diversity_report.py`, `test_encounter_report.py`, `test_comparison_report.py`,
 `test_calibration_report.py`, `test_anomaly_report.py`, `test_cooccurrence_report.py`,
-`test_abundance_report.py`, `test_site_report.py`,
+`test_abundance_report.py`, `test_species_profile.py`, `test_site_report.py`,
 `test_boxops.py`, `test_triage.py`) import only their builder module and need no runtime
 dependencies; the tool- and API-level tests exercise the DB and FastAPI paths.
