@@ -4,6 +4,7 @@ Kept deliberately free of DB/framework imports so the analysis logic can be unit
 in isolation and reused anywhere (REST, MCP tools, the brain adapter).
 """
 
+from .abundance import build_abundance_report
 from .activity import build_activity_report
 from .anomaly import build_anomaly_report
 from .calibration import build_calibration_report
@@ -16,6 +17,7 @@ from .site import build_site_report
 from .trends import build_trend_report
 
 __all__ = [
+    "build_abundance_report",
     "build_activity_report",
     "build_anomaly_report",
     "build_calibration_report",

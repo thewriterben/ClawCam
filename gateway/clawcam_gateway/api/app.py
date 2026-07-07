@@ -1277,6 +1277,26 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             ),
         }
 
+    @app.get("/api/v1/analytics/abundance")
+    def abundance_report_endpoint(
+        limit: int = 5000,
+        tz_offset_hours: int = 0,
+        trap_days: int | None = None,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Relative abundance index — detections per 100 trap-days per species."""
+        from clawcam_gateway.analytics.abundance import build_abundance_report
+
+        safe_limit = max(1, min(int(limit), 50_000))
+        dets = db.list_inference_results(limit=safe_limit, deployment_id=_deployment_scope(auth))
+        return {
+            "ok": True,
+            "report": build_abundance_report(
+                dets, tz_offset_hours=int(tz_offset_hours),
+                trap_days=None if trap_days is None else int(trap_days),
+            ),
+        }
+
     # ── Data export (Phase 5) ────────────────────────────────────────────
 
     @app.get("/api/v1/export/events.csv")

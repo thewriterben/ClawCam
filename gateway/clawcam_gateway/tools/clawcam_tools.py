@@ -653,6 +653,39 @@ def get_cooccurrence_report(
     }
 
 
+def get_abundance_report(
+    context: ToolContext,
+    limit: int = 5000,
+    tz_offset_hours: int = 0,
+    trap_days: int | None = None,
+    deployment_id: str | None = None,
+) -> dict[str, Any]:
+    """Per-species relative abundance index (detections per 100 trap-days).
+
+    Normalises raw counts by survey effort so species are comparable — the camera-trap
+    standard for "how much of each animal is here?". Effort defaults to the inclusive
+    first→last detection span; pass ``trap_days`` when real camera-active days are known.
+
+    Arguments
+    ---------
+    limit:           Max detections to scan (1–50000, default 5000).
+    tz_offset_hours: Shift UTC to local time for day bucketing.
+    trap_days:       Survey effort in camera-active days (optional; estimated if omitted).
+    deployment_id:   Restrict to one deployment (optional).
+    """
+    from clawcam_gateway.analytics.abundance import build_abundance_report
+
+    safe_limit = max(1, min(int(limit), 50_000))
+    dets = context.db.list_inference_results(limit=safe_limit, deployment_id=deployment_id)
+    return {
+        "ok": True,
+        "report": build_abundance_report(
+            dets, tz_offset_hours=int(tz_offset_hours),
+            trap_days=None if trap_days is None else int(trap_days),
+        ),
+    }
+
+
 def get_review_queue(
     context: ToolContext,
     limit: int = 50,
