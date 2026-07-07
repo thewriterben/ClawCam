@@ -108,6 +108,73 @@ def zone_for_bbox(
     return None
 
 
+# ── Area-coverage lookup (robust for edge-straddling subjects) ───────────────
+
+
+def bbox_polygon_coverage(
+    bbox: Iterable[float],
+    polygon: list[list[float]],
+    grid: int = 11,
+) -> float:
+    """Fraction of *bbox*'s area that lies inside *polygon*, in ``[0.0, 1.0]``.
+
+    The center-point test ([`zone_for_bbox`]) can miss a large subject that
+    straddles a zone edge — its center falls just outside while most of its box is
+    inside. This estimates the true overlap by sampling a ``grid`` x ``grid`` lattice
+    of points at the centers of evenly-spaced cells across the bbox and testing each
+    with :func:`point_in_polygon`. Deterministic and dependency-free (no shapely).
+
+    A zero-area bbox or a polygon with fewer than 3 vertices yields ``0.0``. Higher
+    ``grid`` trades a little speed for a finer estimate; the default 11 (121 samples)
+    resolves coverage to roughly ±1%.
+    """
+    coords = list(bbox)
+    if len(coords) != 4:
+        raise ValueError(f"bbox must have 4 elements, got {len(coords)}")
+    x1, y1, x2, y2 = coords
+    lo_x, hi_x = min(x1, x2), max(x1, x2)
+    lo_y, hi_y = min(y1, y2), max(y1, y2)
+    if hi_x <= lo_x or hi_y <= lo_y:
+        return 0.0
+    if not polygon or len(polygon) < 3:
+        return 0.0
+
+    g = max(2, int(grid))
+    inside = 0
+    for i in range(g):
+        px = lo_x + (i + 0.5) / g * (hi_x - lo_x)  # cell-center sampling avoids edge bias
+        for j in range(g):
+            py = lo_y + (j + 0.5) / g * (hi_y - lo_y)
+            if point_in_polygon((px, py), polygon):
+                inside += 1
+    return inside / (g * g)
+
+
+def zone_for_bbox_coverage(
+    bbox: Iterable[float],
+    zones: list[dict[str, Any]],
+    min_coverage: float = 0.5,
+    grid: int = 11,
+) -> dict[str, Any] | None:
+    """Like [`zone_for_bbox`] but by *area overlap* instead of center point.
+
+    Returns the first enabled zone (priority-ascending — lower number wins) whose
+    polygon covers at least ``min_coverage`` of the bbox's area. Robust for large
+    subjects that straddle a zone edge, where the center-point test can miss. Returns
+    ``None`` when no zone meets the threshold, so callers fall back to default
+    behavior exactly as with :func:`zone_for_bbox`.
+    """
+    ordered = sorted(
+        (z for z in zones if z.get("enabled", True)),
+        key=lambda z: z.get("priority", 100),
+    )
+    for zone in ordered:
+        polygon = zone.get("polygon") or []
+        if bbox_polygon_coverage(bbox, polygon, grid=grid) >= min_coverage:
+            return zone
+    return None
+
+
 # ── AlertEvaluator integration helper ───────────────────────────────────────
 
 

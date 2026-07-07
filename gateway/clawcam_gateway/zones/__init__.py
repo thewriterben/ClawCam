@@ -30,10 +30,12 @@ from clawcam_gateway.zones.geometry import (
     ZONE_ACTIONS,
     apply_zones_to_result,
     bbox_center,
+    bbox_polygon_coverage,
     is_valid_polygon,
     is_valid_zone_action,
     point_in_polygon,
     zone_for_bbox,
+    zone_for_bbox_coverage,
 )
 from clawcam_gateway.zones.masks import apply_privacy_masks
 
@@ -46,8 +48,10 @@ __all__ = [
     "apply_privacy_masks",
     "apply_zones_to_result",
     "bbox_center",
+    "bbox_polygon_coverage",
     "is_valid_polygon",
     "is_valid_zone_action",
     "point_in_polygon",
     "zone_for_bbox",
+    "zone_for_bbox_coverage",
 ]
