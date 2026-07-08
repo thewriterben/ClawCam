@@ -715,6 +715,37 @@ def get_species_profile(
         dets, subject, tz_offset_hours=int(tz_offset_hours))}
 
 
+def list_sites(context: ToolContext, limit: int = 100) -> dict[str, Any]:
+    """List survey-area sites (Conservation Grid geo model).
+
+    Each site carries its boundary polygon, origin, and linked metadata — the
+    spatial context detections can be scoped to.
+    """
+    return {"ok": True, "sites": context.db.list_sites(limit=max(1, min(int(limit), 1000)))}
+
+
+def get_site_events(
+    context: ToolContext,
+    site_id: str,
+    limit: int = 1000,
+    deployment_id: str | None = None,
+) -> dict[str, Any]:
+    """Events whose location falls inside a site's boundary polygon.
+
+    Point-in-polygon over the promoted geo columns (indexed bbox prefilter, then
+    exact ray-casting). Answers "what was detected inside this survey area?".
+
+    Arguments
+    ---------
+    site_id:       The site whose boundary scopes the query (required).
+    limit:         Max events to scan (1–50000, default 1000).
+    deployment_id: Restrict to one deployment (optional).
+    """
+    safe_limit = max(1, min(int(limit), 50_000))
+    events = context.db.events_in_site(site_id, limit=safe_limit, deployment_id=deployment_id)
+    return {"ok": True, "site_id": site_id, "count": len(events), "events": events}
+
+
 def get_review_queue(
     context: ToolContext,
     limit: int = 50,

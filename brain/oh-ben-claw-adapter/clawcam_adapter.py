@@ -138,6 +138,8 @@ class ToolPolicy:
         "get_cooccurrence_report",
         "get_abundance_report",
         "get_species_profile",
+        "list_sites",
+        "get_site_events",
         "get_fused_detections",
         "get_review_queue",
         "list_species_detections",

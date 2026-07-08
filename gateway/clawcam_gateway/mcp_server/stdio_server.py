@@ -276,6 +276,29 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "list_sites",
+        "description": "List survey-area sites (Conservation Grid geo model): each carries a boundary polygon, origin, DEM reference, and metadata — the spatial context detections can be scoped to. Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
+            },
+        },
+    },
+    {
+        "name": "get_site_events",
+        "description": "Events whose location falls inside a site's boundary polygon (point-in-polygon over the promoted geo columns: indexed bbox prefilter, then exact ray-casting). Answers 'what was detected inside this survey area?'. Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "site_id": {"type": "string", "description": "The site whose boundary scopes the query (required)."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50000, "default": 1000},
+                "deployment_id": {"type": "string", "description": "Restrict to one deployment (optional)."},
+            },
+            "required": ["site_id"],
+        },
+    },
+    {
         "name": "get_species_profile",
         "description": "Drill-down profile for a single species: composes the analytics suite for one subject — its abundance (RAI), diel pattern and peak hour, trend, independent-encounter count, first/last seen, share of all detections, and the species it most often appears alongside. Answers 'tell me about the coyotes here'. Read-only.",
         "inputSchema": {

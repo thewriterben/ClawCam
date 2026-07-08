@@ -1312,6 +1312,58 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         return {"ok": True, "report": build_species_profile(
             dets, subject, tz_offset_hours=int(tz_offset_hours))}
 
+    # ── Sites (Conservation Grid G0) ─────────────────────────────────────
+
+    @app.get("/api/v1/sites")
+    def list_sites_endpoint(
+        limit: int = 100, auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """List survey-area sites."""
+        return {"ok": True, "sites": db.list_sites(limit=max(1, min(int(limit), 1000)))}
+
+    @app.post("/api/v1/sites")
+    def upsert_site_endpoint(
+        payload: Payload, auth: AuthContext = Depends(require_write),
+    ) -> dict[str, Any]:
+        """Create or update a site (body: site_id, name?, boundary?, origin_lat?, …)."""
+        data = payload.data
+        if not data.get("site_id"):
+            raise HTTPException(status_code=400, detail="site_id is required")
+        db.upsert_site(data)
+        return {"ok": True, "site": db.get_site(data["site_id"])}
+
+    @app.get("/api/v1/sites/{site_id}")
+    def get_site_endpoint(
+        site_id: str, auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Fetch one site by id."""
+        site = db.get_site(site_id)
+        if site is None:
+            raise HTTPException(status_code=404, detail=f"unknown site: {site_id}")
+        return {"ok": True, "site": site}
+
+    @app.get("/api/v1/sites/{site_id}/events")
+    def site_events_endpoint(
+        site_id: str, limit: int = 1000, auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Events whose location falls inside the site's boundary polygon."""
+        events = db.events_in_site(
+            site_id, limit=max(1, min(int(limit), 50_000)),
+            deployment_id=_deployment_scope(auth),
+        )
+        return {"ok": True, "site_id": site_id, "count": len(events), "events": events}
+
+    @app.put("/api/v1/deployments/{deployment_id}/site")
+    def set_deployment_site_endpoint(
+        deployment_id: str, payload: Payload, auth: AuthContext = Depends(require_write),
+    ) -> dict[str, Any]:
+        """Link (or unlink, with a null site_id) a deployment to a site."""
+        db.set_deployment_site(deployment_id, payload.data.get("site_id"))
+        return {
+            "ok": True, "deployment_id": deployment_id,
+            "site_id": db.site_for_deployment(deployment_id),
+        }
+
     # ── Data export (Phase 5) ────────────────────────────────────────────
 
     @app.get("/api/v1/export/events.csv")
