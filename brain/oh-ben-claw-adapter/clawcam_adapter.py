@@ -138,6 +138,7 @@ class ToolPolicy:
         "get_cooccurrence_report",
         "get_abundance_report",
         "get_environment_report",
+        "get_weather_activity_report",
         "get_species_profile",
         "list_sites",
         "get_site_events",

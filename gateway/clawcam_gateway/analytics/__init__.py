@@ -17,6 +17,7 @@ from .environment import build_environment_report
 from .site import build_site_report
 from .species import build_species_profile
 from .trends import build_trend_report
+from .weather_activity import build_weather_activity_report
 
 __all__ = [
     "build_abundance_report",
@@ -32,4 +33,5 @@ __all__ = [
     "build_site_report",
     "build_species_profile",
     "build_trend_report",
+    "build_weather_activity_report",
 ]

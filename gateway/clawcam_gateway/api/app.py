@@ -1277,6 +1277,25 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             ),
         }
 
+    @app.get("/api/v1/analytics/weather-activity")
+    def weather_activity_report_endpoint(
+        limit: int = 5000,
+        quantity: str = "temperature_c",
+        bins: int = 5,
+        max_gap_minutes: float = 120.0,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Detection activity vs weather — exposure-normalized rate per bin + correlation."""
+        from clawcam_gateway.analytics.weather_activity import build_weather_activity_report
+
+        safe_limit = max(1, min(int(limit), 50_000))
+        scope = _deployment_scope(auth)
+        dets = db.list_inference_results(limit=safe_limit, deployment_id=scope)
+        rows = db.environment_series(limit=safe_limit, deployment_id=scope)
+        return {"ok": True, "report": build_weather_activity_report(
+            dets, rows, quantity=str(quantity), bins=int(bins),
+            max_gap_minutes=float(max_gap_minutes))}
+
     @app.get("/api/v1/analytics/environment")
     def environment_report_endpoint(
         limit: int = 1000,

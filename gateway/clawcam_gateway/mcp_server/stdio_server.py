@@ -299,6 +299,22 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_weather_activity_report",
+        "description": "Correlate detection activity with weather: aligns each detection to its nearest-in-time environmental reading, bins detections by a quantity (temperature_c / humidity_percent / pressure_hpa), normalizes by exposure (readings per bin) to a rate, and reports a Pearson correlation + peak bin. Answers 'does activity track temperature/humidity/pressure here?'. Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50000, "default": 5000},
+                "quantity": {"type": "string", "enum": ["temperature_c", "humidity_percent", "pressure_hpa"],
+                             "default": "temperature_c", "description": "Environmental value to bin by."},
+                "bins": {"type": "integer", "minimum": 1, "maximum": 50, "default": 5},
+                "max_gap_minutes": {"type": "number", "minimum": 0, "default": 120,
+                                    "description": "Drop a detection with no reading within this gap."},
+                "deployment_id": {"type": "string", "description": "Restrict to one deployment (optional)."},
+            },
+        },
+    },
+    {
         "name": "get_environment_report",
         "description": "Environmental telemetry summary from health records: for temperature, humidity, and pressure (the promoted columns) — current value, min/max, mean, trend (rising/falling/steady), and a per-day series. Answers 'what are conditions here and which way are they heading?'. Read-only.",
         "inputSchema": {

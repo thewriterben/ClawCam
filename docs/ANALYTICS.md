@@ -16,6 +16,7 @@ about.
 | Diversity | `build_diversity_report` | `get_diversity_report` | `GET /api/v1/analytics/diversity` | *How diverse* is the site — one species or many? |
 | Abundance | `build_abundance_report` | `get_abundance_report` | `GET /api/v1/analytics/abundance` | *How much of each species* per unit effort? (RAI) |
 | Environment | `build_environment_report` | `get_environment_report` | `GET /api/v1/analytics/environment` | *What are the conditions* (temp/humidity/pressure) and their trend? |
+| Weather–activity | `build_weather_activity_report` | `get_weather_activity_report` | `GET /api/v1/analytics/weather-activity` | *Does activity track conditions?* (rate vs temp/humidity/pressure + correlation) |
 | Encounters | `build_encounter_report` | `get_encounter_report` | `GET /api/v1/analytics/encounters` | *How many real visits* (not frames)? |
 | Comparison | `build_comparison_report` | `get_comparison_report` | `GET /api/v1/analytics/comparison` | *How does this week compare to last?* |
 | Calibration | `build_calibration_report` | `get_calibration_report` | `GET /api/v1/analytics/calibration` | *Can I trust the model's confidence, and at what threshold?* |
@@ -54,6 +55,15 @@ mean, a trend (rising/falling/steady via mean-of-halves with a spread-relative d
 so a few hPa of pressure reads as a real trend rather than noise), and a per-day mean
 series. Only quantities actually present appear. It reads via `db.environment_series`,
 which surfaces the columns G0 promoted out of the `health_records` JSON blob.
+
+**Weather–activity** joins the two streams that live apart — detections and environmental
+readings — to answer "does activity track conditions here?". Each detection is aligned to
+its nearest-in-time reading (dropped if none within `max_gap_minutes`), binned by the
+chosen `quantity`, and normalized by **exposure** (readings per bin) into a *rate*
+(detections per reading) — so the result reflects animal behaviour, not just how long each
+condition lasted. It reports the per-bin rate, the `peak_bin`, and a Pearson `correlation`
+between bin value and rate (direction and strength). Selectable quantity so it works for
+temperature, humidity, or pressure.
 
 **Encounters** collapses lingering captures into *independent detection events*:
 consecutive same-subject detections closer than `gap_minutes` (default 30) count as one
@@ -189,7 +199,7 @@ python -m pytest ../tests/gateway -q
 The pure analytics tests (`test_activity_report.py`, `test_trend_report.py`,
 `test_diversity_report.py`, `test_encounter_report.py`, `test_comparison_report.py`,
 `test_calibration_report.py`, `test_anomaly_report.py`, `test_cooccurrence_report.py`,
-`test_abundance_report.py`, `test_environment_report.py`, `test_species_profile.py`,
-`test_site_report.py`,
+`test_abundance_report.py`, `test_environment_report.py`,
+`test_weather_activity_report.py`, `test_species_profile.py`, `test_site_report.py`,
 `test_boxops.py`, `test_triage.py`) import only their builder module and need no runtime
 dependencies; the tool- and API-level tests exercise the DB and FastAPI paths.

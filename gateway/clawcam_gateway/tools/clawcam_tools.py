@@ -714,6 +714,42 @@ def get_environment_report(
     }
 
 
+def get_weather_activity_report(
+    context: ToolContext,
+    limit: int = 5000,
+    quantity: str = "temperature_c",
+    bins: int = 5,
+    max_gap_minutes: float = 120.0,
+    deployment_id: str | None = None,
+) -> dict[str, Any]:
+    """Correlate detection activity with weather — does activity track conditions?
+
+    Aligns each detection to its nearest-in-time environmental reading, bins detections by
+    the chosen ``quantity`` (temperature_c / humidity_percent / pressure_hpa), normalizes by
+    exposure (readings per bin), and reports the per-bin rate plus a Pearson correlation.
+
+    Arguments
+    ---------
+    limit:           Max detections and readings to scan each (1–50000, default 5000).
+    quantity:        Environmental value to bin by (default temperature_c).
+    bins:            Number of equal-width bins (default 5).
+    max_gap_minutes: Drop a detection if the nearest reading is further away (default 120).
+    deployment_id:   Restrict to one deployment (optional).
+    """
+    from clawcam_gateway.analytics.weather_activity import build_weather_activity_report
+
+    safe_limit = max(1, min(int(limit), 50_000))
+    dets = context.db.list_inference_results(limit=safe_limit, deployment_id=deployment_id)
+    rows = context.db.environment_series(limit=safe_limit, deployment_id=deployment_id)
+    return {
+        "ok": True,
+        "report": build_weather_activity_report(
+            dets, rows, quantity=str(quantity), bins=int(bins),
+            max_gap_minutes=float(max_gap_minutes),
+        ),
+    }
+
+
 def get_species_profile(
     context: ToolContext,
     subject: str,
