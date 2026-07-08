@@ -6,5 +6,15 @@ per-node model updates into a shared global model.
 """
 
 from clawcam_gateway.federated.fedavg import federated_average
+from clawcam_gateway.federated.round import (
+    build_local_update,
+    federated_round_from_reviews,
+    run_federated_round,
+)
 
-__all__ = ["federated_average"]
+__all__ = [
+    "federated_average",
+    "build_local_update",
+    "run_federated_round",
+    "federated_round_from_reviews",
+]
