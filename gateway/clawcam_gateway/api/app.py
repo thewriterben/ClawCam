@@ -1277,6 +1277,19 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             ),
         }
 
+    @app.get("/api/v1/analytics/environment")
+    def environment_report_endpoint(
+        limit: int = 1000,
+        tz_offset_hours: int = 0,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Environmental telemetry — temperature/humidity/pressure stats, trend, daily."""
+        from clawcam_gateway.analytics.environment import build_environment_report
+
+        safe_limit = max(1, min(int(limit), 50_000))
+        rows = db.environment_series(limit=safe_limit, deployment_id=_deployment_scope(auth))
+        return {"ok": True, "report": build_environment_report(rows, tz_offset_hours=int(tz_offset_hours))}
+
     @app.get("/api/v1/analytics/abundance")
     def abundance_report_endpoint(
         limit: int = 5000,

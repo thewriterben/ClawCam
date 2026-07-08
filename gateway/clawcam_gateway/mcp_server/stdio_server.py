@@ -299,6 +299,19 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_environment_report",
+        "description": "Environmental telemetry summary from health records: for temperature, humidity, and pressure (the promoted columns) — current value, min/max, mean, trend (rising/falling/steady), and a per-day series. Answers 'what are conditions here and which way are they heading?'. Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50000, "default": 1000},
+                "tz_offset_hours": {"type": "integer", "default": 0,
+                                    "description": "Shift UTC to local time for the daily series."},
+                "deployment_id": {"type": "string", "description": "Restrict to one deployment (optional)."},
+            },
+        },
+    },
+    {
         "name": "list_device_positions",
         "description": "List devices that have a known geographic position — the mappable camera/sensor nodes (device_id, name, latitude, longitude, deployment). Read-only.",
         "inputSchema": {

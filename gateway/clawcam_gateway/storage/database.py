@@ -578,6 +578,29 @@ class GatewayDatabase:
                 ),
             )
 
+    def environment_series(
+        self, limit: int = 1000, deployment_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Health readings with their promoted environmental columns, for analytics.
+
+        Returns ``timestamp`` + ``temperature_c`` / ``humidity_percent`` / ``pressure_hpa``
+        (most recent first), the input to ``build_environment_report``.
+        """
+        clauses: list[str] = []
+        params: list[Any] = []
+        if deployment_id is not None:
+            clauses.append("deployment_id = ?")
+            params.append(deployment_id)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"SELECT timestamp, temperature_c, humidity_percent, pressure_hpa "
+                f"FROM health_records {where} ORDER BY timestamp DESC LIMIT ?",
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def clear_deployment_detections(self, deployment_id: str) -> dict[str, int]:
         """Delete the detection-related rows for a deployment. Returns row counts.
 

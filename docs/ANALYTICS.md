@@ -15,6 +15,7 @@ about.
 | Trends | `build_trend_report` | `get_trend_report` | `GET /api/v1/analytics/trends` | *How are the rates changing* — who's rising/falling? |
 | Diversity | `build_diversity_report` | `get_diversity_report` | `GET /api/v1/analytics/diversity` | *How diverse* is the site — one species or many? |
 | Abundance | `build_abundance_report` | `get_abundance_report` | `GET /api/v1/analytics/abundance` | *How much of each species* per unit effort? (RAI) |
+| Environment | `build_environment_report` | `get_environment_report` | `GET /api/v1/analytics/environment` | *What are the conditions* (temp/humidity/pressure) and their trend? |
 | Encounters | `build_encounter_report` | `get_encounter_report` | `GET /api/v1/analytics/encounters` | *How many real visits* (not frames)? |
 | Comparison | `build_comparison_report` | `get_comparison_report` | `GET /api/v1/analytics/comparison` | *How does this week compare to last?* |
 | Calibration | `build_calibration_report` | `get_calibration_report` | `GET /api/v1/analytics/calibration` | *Can I trust the model's confidence, and at what threshold?* |
@@ -46,6 +47,13 @@ index, Pielou evenness, Simpson dominance, and the dominant subject.
 species — normalising raw counts by survey effort so species (and sites) are comparable.
 Effort (`trap_days`) defaults to the inclusive first→last detection span, with
 `trap_days_source` flagging the estimate; pass real camera-active days when known.
+
+**Environment** turns the promoted health-record columns (`temperature_c`,
+`humidity_percent`, `pressure_hpa`) into a per-quantity summary: current value, min/max,
+mean, a trend (rising/falling/steady via mean-of-halves with a spread-relative dead-band,
+so a few hPa of pressure reads as a real trend rather than noise), and a per-day mean
+series. Only quantities actually present appear. It reads via `db.environment_series`,
+which surfaces the columns G0 promoted out of the `health_records` JSON blob.
 
 **Encounters** collapses lingering captures into *independent detection events*:
 consecutive same-subject detections closer than `gap_minutes` (default 30) count as one
@@ -181,6 +189,7 @@ python -m pytest ../tests/gateway -q
 The pure analytics tests (`test_activity_report.py`, `test_trend_report.py`,
 `test_diversity_report.py`, `test_encounter_report.py`, `test_comparison_report.py`,
 `test_calibration_report.py`, `test_anomaly_report.py`, `test_cooccurrence_report.py`,
-`test_abundance_report.py`, `test_species_profile.py`, `test_site_report.py`,
+`test_abundance_report.py`, `test_environment_report.py`, `test_species_profile.py`,
+`test_site_report.py`,
 `test_boxops.py`, `test_triage.py`) import only their builder module and need no runtime
 dependencies; the tool- and API-level tests exercise the DB and FastAPI paths.
