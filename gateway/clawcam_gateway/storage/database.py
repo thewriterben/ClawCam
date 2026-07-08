@@ -417,11 +417,24 @@ class GatewayDatabase:
             self._add_column_if_missing(conn, "events", "latitude", "REAL")
             self._add_column_if_missing(conn, "events", "longitude", "REAL")
             self._add_column_if_missing(conn, "events", "altitude_m", "REAL")
+            self._add_column_if_missing(conn, "devices", "latitude", "REAL")
+            self._add_column_if_missing(conn, "devices", "longitude", "REAL")
             self._add_column_if_missing(conn, "health_records", "temperature_c", "REAL")
             self._add_column_if_missing(conn, "health_records", "humidity_percent", "REAL")
             self._add_column_if_missing(conn, "health_records", "pressure_hpa", "REAL")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_events_latlon ON events(latitude, longitude)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_devices_latlon ON devices(latitude, longitude)"
+            )
+            conn.execute(
+                """
+                UPDATE devices SET
+                    latitude  = COALESCE(latitude,  json_extract(payload_json, '$.location.latitude')),
+                    longitude = COALESCE(longitude, json_extract(payload_json, '$.location.longitude'))
+                WHERE latitude IS NULL OR longitude IS NULL
+                """
             )
             conn.execute(
                 """
@@ -468,18 +481,22 @@ class GatewayDatabase:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_def}")
 
     def upsert_device(self, payload: dict[str, Any]) -> None:
+        loc = payload.get("location") or {}
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO devices (device_id, device_type, name, status, payload_json, created_at, last_seen_at, deployment_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO devices (device_id, device_type, name, status, payload_json,
+                    created_at, last_seen_at, deployment_id, latitude, longitude)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(device_id) DO UPDATE SET
                     device_type = excluded.device_type,
                     name = excluded.name,
                     status = excluded.status,
                     payload_json = excluded.payload_json,
                     last_seen_at = excluded.last_seen_at,
-                    deployment_id = excluded.deployment_id
+                    deployment_id = excluded.deployment_id,
+                    latitude = COALESCE(excluded.latitude, devices.latitude),
+                    longitude = COALESCE(excluded.longitude, devices.longitude)
                 """,
                 (
                     payload["device_id"],
@@ -490,6 +507,8 @@ class GatewayDatabase:
                     payload["created_at"],
                     payload.get("last_seen_at"),
                     payload.get("deployment_id", "default"),
+                    loc.get("latitude"),
+                    loc.get("longitude"),
                 ),
             )
 
@@ -757,6 +776,51 @@ class GatewayDatabase:
             if point_in_polygon((lat, lon), boundary):
                 hits.append(ev)
         return hits
+
+    def set_device_position(self, device_id: str, latitude: float, longitude: float) -> bool:
+        """Set a device's geographic position (e.g. from a site plan). Returns True if a
+        row was updated."""
+        with self.connect() as conn:
+            cur = conn.execute(
+                "UPDATE devices SET latitude = ?, longitude = ? WHERE device_id = ?",
+                (latitude, longitude, device_id),
+            )
+        return cur.rowcount > 0
+
+    def devices_with_position(self, deployment_id: str | None = None) -> list[dict[str, Any]]:
+        """Devices that have a known ``(latitude, longitude)`` — the mappable nodes."""
+        clauses = ["latitude IS NOT NULL", "longitude IS NOT NULL"]
+        params: list[Any] = []
+        if deployment_id is not None:
+            clauses.append("deployment_id = ?")
+            params.append(deployment_id)
+        where = " AND ".join(clauses)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"SELECT device_id, name, latitude, longitude, deployment_id "
+                f"FROM devices WHERE {where} ORDER BY device_id",
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def devices_in_site(
+        self, site_id: str, deployment_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Devices whose position falls inside a site's boundary polygon (point-in-polygon).
+
+        Returns ``[]`` if the site is unknown or has no boundary.
+        """
+        from clawcam_gateway.zones.geometry import point_in_polygon
+
+        site = self.get_site(site_id)
+        if not site or not site["boundary"]:
+            return []
+        boundary = site["boundary"]
+        return [
+            d
+            for d in self.devices_with_position(deployment_id=deployment_id)
+            if point_in_polygon((d["latitude"], d["longitude"]), boundary)
+        ]
 
     def get_device(self, device_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
