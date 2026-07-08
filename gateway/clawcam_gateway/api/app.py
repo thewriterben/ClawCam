@@ -1364,6 +1364,34 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             "site_id": db.site_for_deployment(deployment_id),
         }
 
+    @app.get("/api/v1/devices/positions")
+    def device_positions_endpoint(
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Devices with a known geographic position — the mappable nodes."""
+        return {"ok": True, "devices": db.devices_with_position(deployment_id=_deployment_scope(auth))}
+
+    @app.get("/api/v1/sites/{site_id}/devices")
+    def site_devices_endpoint(
+        site_id: str, auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Devices whose position falls inside the site's boundary polygon."""
+        devices = db.devices_in_site(site_id, deployment_id=_deployment_scope(auth))
+        return {"ok": True, "site_id": site_id, "count": len(devices), "devices": devices}
+
+    @app.put("/api/v1/devices/{device_id}/position")
+    def set_device_position_endpoint(
+        device_id: str, payload: Payload, auth: AuthContext = Depends(require_write),
+    ) -> dict[str, Any]:
+        """Set a device's geographic position (e.g. from a site plan)."""
+        data = payload.data
+        lat, lon = data.get("latitude"), data.get("longitude")
+        if lat is None or lon is None:
+            raise HTTPException(status_code=400, detail="latitude and longitude are required")
+        if not db.set_device_position(device_id, float(lat), float(lon)):
+            raise HTTPException(status_code=404, detail=f"unknown device: {device_id}")
+        return {"ok": True, "device_id": device_id, "latitude": float(lat), "longitude": float(lon)}
+
     # ── Data export (Phase 5) ────────────────────────────────────────────
 
     @app.get("/api/v1/export/events.csv")

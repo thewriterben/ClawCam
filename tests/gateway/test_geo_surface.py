@@ -72,9 +72,49 @@ def test_deployment_site_link_endpoint(tmp_path):
     assert r.json()["site_id"] == "s1"
 
 
+def _device(db, device_id, lat=None, lon=None):
+    payload = {
+        "device_id": device_id, "device_type": "camera-node", "name": device_id,
+        "status": "online", "created_at": "2026-05-01T00:00:00+00:00", "deployment_id": "default",
+    }
+    if lat is not None:
+        payload["location"] = {"latitude": lat, "longitude": lon}
+    db.upsert_device(payload)
+
+
+def test_device_positions_and_site_devices(tmp_path):
+    client, db = _app_and_db(tmp_path)
+    db.upsert_site({"site_id": "s1", "boundary": _SQUARE})
+    _device(db, "inside", 45.5, -122.6)
+    _device(db, "outside", 10.0, 10.0)
+    _device(db, "nogeo")
+
+    r = client.get("/api/v1/devices/positions")
+    assert r.status_code == 200
+    ids = {d["device_id"] for d in r.json()["devices"]}
+    assert ids == {"inside", "outside"}  # nogeo excluded
+
+    r = client.get("/api/v1/sites/s1/devices")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] == 1
+    assert body["devices"][0]["device_id"] == "inside"
+
+
+def test_set_device_position_endpoint(tmp_path):
+    client, db = _app_and_db(tmp_path)
+    _device(db, "n1")
+    r = client.put("/api/v1/devices/n1/position", json={"data": {"latitude": 45.55, "longitude": -122.61}})
+    assert r.status_code == 200, r.text
+    assert db.devices_with_position()[0]["latitude"] == 45.55
+    assert client.put("/api/v1/devices/nope/position",
+                      json={"data": {"latitude": 1.0, "longitude": 2.0}}).status_code == 404
+    assert client.put("/api/v1/devices/n1/position", json={"data": {}}).status_code == 400
+
+
 def test_new_tools_in_catalog_and_auto_approved(tmp_path):
     client, _ = _app_and_db(tmp_path)
     tools = {t["name"]: t for t in client.get("/api/v1/tools").json()["tools"]}
-    for name in ("list_sites", "get_site_events"):
+    for name in ("list_sites", "get_site_events", "list_device_positions", "get_site_devices"):
         assert name in tools, f"{name} missing from tool catalog"
         assert tools[name]["approval_required"] is False  # read-only → auto-approved

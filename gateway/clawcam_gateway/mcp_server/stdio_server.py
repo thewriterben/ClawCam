@@ -299,6 +299,28 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "list_device_positions",
+        "description": "List devices that have a known geographic position — the mappable camera/sensor nodes (device_id, name, latitude, longitude, deployment). Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "deployment_id": {"type": "string", "description": "Restrict to one deployment (optional)."},
+            },
+        },
+    },
+    {
+        "name": "get_site_devices",
+        "description": "Devices whose position falls inside a site's boundary polygon (point-in-polygon). Answers 'which nodes are deployed inside this survey area?'. Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "site_id": {"type": "string", "description": "The site whose boundary scopes the query (required)."},
+                "deployment_id": {"type": "string", "description": "Restrict to one deployment (optional)."},
+            },
+            "required": ["site_id"],
+        },
+    },
+    {
         "name": "get_species_profile",
         "description": "Drill-down profile for a single species: composes the analytics suite for one subject — its abundance (RAI), diel pattern and peak hour, trend, independent-encounter count, first/last seen, share of all detections, and the species it most often appears alongside. Answers 'tell me about the coyotes here'. Read-only.",
         "inputSchema": {

@@ -140,6 +140,8 @@ class ToolPolicy:
         "get_species_profile",
         "list_sites",
         "get_site_events",
+        "list_device_positions",
+        "get_site_devices",
         "get_fused_detections",
         "get_review_queue",
         "list_species_detections",

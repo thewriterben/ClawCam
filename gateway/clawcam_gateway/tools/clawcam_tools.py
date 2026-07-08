@@ -746,6 +746,25 @@ def get_site_events(
     return {"ok": True, "site_id": site_id, "count": len(events), "events": events}
 
 
+def list_device_positions(context: ToolContext, deployment_id: str | None = None) -> dict[str, Any]:
+    """List devices that have a known geographic position — the mappable nodes.
+
+    Each entry carries device_id, name, latitude, longitude and deployment_id.
+    """
+    return {"ok": True, "devices": context.db.devices_with_position(deployment_id=deployment_id)}
+
+
+def get_site_devices(
+    context: ToolContext, site_id: str, deployment_id: str | None = None
+) -> dict[str, Any]:
+    """Devices whose position falls inside a site's boundary polygon (point-in-polygon).
+
+    Answers "which nodes are deployed inside this survey area?".
+    """
+    devices = context.db.devices_in_site(site_id, deployment_id=deployment_id)
+    return {"ok": True, "site_id": site_id, "count": len(devices), "devices": devices}
+
+
 def get_review_queue(
     context: ToolContext,
     limit: int = 50,
