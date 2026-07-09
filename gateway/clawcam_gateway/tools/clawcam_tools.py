@@ -796,6 +796,60 @@ def get_habitat_report(
     }
 
 
+def run_federated_round(
+    context: ToolContext,
+    updates: list[dict[str, Any]] | None = None,
+    include_local: bool = True,
+    node_id: str = "local",
+    target_precision: float = 0.9,
+    trust: dict[str, float] | None = None,
+    previous: dict[str, Any] | None = None,
+    limit: int = 5000,
+    deployment_id: str | None = None,
+) -> dict[str, Any]:
+    """Aggregate federated model updates into the next global model (Conservation Grid G9).
+
+    Federated learning without shipping imagery: each camera node turns its *local
+    human-review labels* into a tiny update (a review-grounded confidence threshold + a
+    sample count), and a coordinator averages them, sample- and trust-weighted, into a
+    versioned global model. Only thresholds and counts move between nodes — never raw
+    detections or images.
+
+    This gateway contributes its own local update built from its reviewed detections when
+    ``include_local`` is set; pass ``updates`` to fold in peer nodes' updates too. Returns
+    ``{version, weights, nodes, total_weight, params}`` plus the contributing node ids.
+
+    Arguments
+    ---------
+    updates:          Peer-node updates, each ``{node_id, sample_count, weights}`` (optional).
+    include_local:    Build + include this gateway's own update from its reviews (default true).
+    node_id:          Id for this gateway's local update (default "local").
+    target_precision: Precision target for the local threshold (default 0.9).
+    trust:            Optional ``{node_id: weight}`` trust multipliers for the aggregate.
+    previous:         Prior global model (its ``version`` is incremented); ``None`` = round 1.
+    limit:            Max detections to scan for reviewed ones (1–50000, default 5000).
+    deployment_id:    Restrict the local update to one deployment (optional).
+    """
+    from clawcam_gateway.federated import build_local_update, run_federated_round
+
+    ups: list[dict[str, Any]] = list(updates or [])
+    if include_local:
+        safe_limit = max(1, min(int(limit), 50_000))
+        rows = context.db.list_inference_results(limit=safe_limit, deployment_id=deployment_id)
+        ups.append(build_local_update(str(node_id), rows, target_precision=float(target_precision)))
+    if not ups:
+        return {"ok": False, "error": "no updates: pass 'updates' or enable 'include_local'"}
+    try:
+        model = run_federated_round(ups, trust=trust, previous=previous)
+    except (ValueError, TypeError, KeyError) as exc:
+        return {"ok": False, "error": f"federated round failed: {exc}"}
+    return {
+        "ok": True,
+        "model": model,
+        "contributors": [u.get("node_id") for u in ups],
+    }
+
+
 def get_species_profile(
     context: ToolContext,
     subject: str,

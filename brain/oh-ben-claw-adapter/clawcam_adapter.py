@@ -140,6 +140,7 @@ class ToolPolicy:
         "get_environment_report",
         "get_weather_activity_report",
         "get_habitat_report",
+        "run_federated_round",
         "get_species_profile",
         "list_sites",
         "get_site_events",

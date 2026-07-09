@@ -80,6 +80,22 @@ class HabitatRequest(BaseModel):
     top_n: int = 3
 
 
+class FederatedRoundRequest(BaseModel):
+    """Body for the federated-round endpoint (Conservation Grid G9).
+
+    Aggregates this gateway's local update (built from its reviews when ``include_local``)
+    with any peer-node ``updates`` into the next versioned global model.
+    """
+
+    updates: list[dict[str, Any]] = Field(default_factory=list)
+    include_local: bool = True
+    node_id: str = "local"
+    target_precision: float = 0.9
+    trust: dict[str, float] | None = None
+    previous: dict[str, Any] | None = None
+    limit: int = 5000
+
+
 class CommandAck(BaseModel):
     """Node acknowledgement for a dispatched command."""
 
@@ -1345,6 +1361,27 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         safe_limit = max(1, min(int(req.limit), 50_000))
         dets = db.list_inference_results(limit=safe_limit, deployment_id=_deployment_scope(auth))
         return {"ok": True, "report": build_habitat_report(dets, lc, top_n=int(req.top_n))}
+
+    @app.post("/api/v1/federated/round")
+    def federated_round_endpoint(
+        req: FederatedRoundRequest,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Aggregate federated model updates (+ this gateway's local update) into a global model."""
+        from clawcam_gateway.federated import build_local_update, run_federated_round
+
+        ups = list(req.updates)
+        if req.include_local:
+            safe_limit = max(1, min(int(req.limit), 50_000))
+            rows = db.list_inference_results(limit=safe_limit, deployment_id=_deployment_scope(auth))
+            ups.append(build_local_update(str(req.node_id), rows, target_precision=float(req.target_precision)))
+        if not ups:
+            return {"ok": False, "error": "no updates: pass 'updates' or enable 'include_local'"}
+        try:
+            model = run_federated_round(ups, trust=req.trust, previous=req.previous)
+        except (ValueError, TypeError, KeyError) as exc:
+            return {"ok": False, "error": f"federated round failed: {exc}"}
+        return {"ok": True, "model": model, "contributors": [u.get("node_id") for u in ups]}
 
     @app.get("/api/v1/analytics/abundance")
     def abundance_report_endpoint(

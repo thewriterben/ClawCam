@@ -342,6 +342,37 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "run_federated_round",
+        "description": "Aggregate federated model updates into the next global model (Conservation Grid G9). Each camera node turns its local human-review labels into a tiny update (a review-grounded confidence threshold + a sample count); this averages them, sample- and trust-weighted, into a versioned global model — only thresholds and counts move between nodes, never imagery. Includes this gateway's own local update from its reviewed detections by default; pass 'updates' to fold in peer nodes. Read-only (computes a model artifact; changes nothing).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "updates": {
+                    "type": "array",
+                    "description": "Peer-node updates, each {node_id, sample_count, weights}.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "node_id": {"type": "string"},
+                            "sample_count": {"type": "integer"},
+                            "weights": {"type": "object", "description": "Map of weight-vector name -> list of numbers."},
+                        },
+                        "required": ["node_id", "sample_count", "weights"],
+                    },
+                },
+                "include_local": {"type": "boolean", "default": True,
+                                  "description": "Build + include this gateway's own update from its reviews."},
+                "node_id": {"type": "string", "default": "local", "description": "Id for this gateway's local update."},
+                "target_precision": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.9,
+                                     "description": "Precision target for the local threshold."},
+                "trust": {"type": "object", "description": "Optional {node_id: weight} trust multipliers."},
+                "previous": {"type": "object", "description": "Prior global model (its version is incremented)."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50000, "default": 5000},
+                "deployment_id": {"type": "string", "description": "Restrict the local update to one deployment (optional)."},
+            },
+        },
+    },
+    {
         "name": "get_environment_report",
         "description": "Environmental telemetry summary from health records: for temperature, humidity, and pressure (the promoted columns) — current value, min/max, mean, trend (rising/falling/steady), and a per-day series. Answers 'what are conditions here and which way are they heading?'. Read-only.",
         "inputSchema": {
