@@ -14,6 +14,7 @@ from .daily import build_daily_site_section
 from .diversity import build_diversity_report
 from .encounters import build_encounter_report
 from .environment import build_environment_report
+from .habitat import LandCover, build_habitat_report
 from .site import build_site_report
 from .species import build_species_profile
 from .trends import build_trend_report
@@ -30,6 +31,8 @@ __all__ = [
     "build_diversity_report",
     "build_encounter_report",
     "build_environment_report",
+    "build_habitat_report",
+    "LandCover",
     "build_site_report",
     "build_species_profile",
     "build_trend_report",

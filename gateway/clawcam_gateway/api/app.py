@@ -68,6 +68,18 @@ class ToolRequest(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
+class HabitatRequest(BaseModel):
+    """Body for the habitat-selection analytics endpoint.
+
+    ``landcover`` is a classified raster grid: origin_lat, origin_lon, step (degrees),
+    and rows (2-D array of class-label strings).
+    """
+
+    landcover: dict[str, Any]
+    limit: int = 5000
+    top_n: int = 3
+
+
 class CommandAck(BaseModel):
     """Node acknowledgement for a dispatched command."""
 
@@ -1308,6 +1320,31 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         safe_limit = max(1, min(int(limit), 50_000))
         rows = db.environment_series(limit=safe_limit, deployment_id=_deployment_scope(auth))
         return {"ok": True, "report": build_environment_report(rows, tz_offset_hours=int(tz_offset_hours))}
+
+    @app.post("/api/v1/analytics/habitat")
+    def habitat_report_endpoint(
+        req: HabitatRequest,
+        auth: AuthContext = Depends(get_auth_context),
+    ) -> dict[str, Any]:
+        """Habitat selection — detection use vs. land-cover availability (selection ratio + electivity)."""
+        from clawcam_gateway.analytics.habitat import LandCover, build_habitat_report
+
+        lc_in = req.landcover
+        if not isinstance(lc_in, dict) or "rows" not in lc_in:
+            return {"ok": False, "error": "landcover must be an object with origin_lat, origin_lon, step, rows"}
+        try:
+            lc = LandCover(
+                origin_lat=float(lc_in["origin_lat"]),
+                origin_lon=float(lc_in["origin_lon"]),
+                step=float(lc_in["step"]),
+                rows=[[str(c) for c in row] for row in lc_in["rows"]],
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return {"ok": False, "error": f"invalid landcover grid: {exc}"}
+
+        safe_limit = max(1, min(int(req.limit), 50_000))
+        dets = db.list_inference_results(limit=safe_limit, deployment_id=_deployment_scope(auth))
+        return {"ok": True, "report": build_habitat_report(dets, lc, top_n=int(req.top_n))}
 
     @app.get("/api/v1/analytics/abundance")
     def abundance_report_endpoint(

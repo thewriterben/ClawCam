@@ -315,6 +315,33 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_habitat_report",
+        "description": "Compare species' habitat use against availability using a caller-supplied land-cover raster. Per class, reports use vs. area (selection ratio > 1 = preference, < 1 = avoidance) and Ivlev electivity (bounded -1..+1), plus the top species in each class. Answers 'which habitats do the animals here prefer?'. Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "landcover": {
+                    "type": "object",
+                    "description": "Classified raster grid over the survey area.",
+                    "properties": {
+                        "origin_lat": {"type": "number", "description": "Latitude of cell (0,0)."},
+                        "origin_lon": {"type": "number", "description": "Longitude of cell (0,0)."},
+                        "step": {"type": "number", "description": "Cell size in degrees."},
+                        "rows": {"type": "array",
+                                 "description": "2-D array of class-label strings; rows[r][c] is the class at lat=origin_lat+r*step, lon=origin_lon+c*step.",
+                                 "items": {"type": "array", "items": {"type": "string"}}},
+                    },
+                    "required": ["origin_lat", "origin_lon", "step", "rows"],
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50000, "default": 5000},
+                "top_n": {"type": "integer", "minimum": 1, "maximum": 20, "default": 3,
+                          "description": "Top species to list per class."},
+                "deployment_id": {"type": "string", "description": "Restrict to one deployment (optional)."},
+            },
+            "required": ["landcover"],
+        },
+    },
+    {
         "name": "get_environment_report",
         "description": "Environmental telemetry summary from health records: for temperature, humidity, and pressure (the promoted columns) — current value, min/max, mean, trend (rising/falling/steady), and a per-day series. Answers 'what are conditions here and which way are they heading?'. Read-only.",
         "inputSchema": {

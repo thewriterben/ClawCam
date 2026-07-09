@@ -750,6 +750,52 @@ def get_weather_activity_report(
     }
 
 
+def get_habitat_report(
+    context: ToolContext,
+    landcover: dict[str, Any],
+    limit: int = 5000,
+    top_n: int = 3,
+    deployment_id: str | None = None,
+) -> dict[str, Any]:
+    """Compare species' habitat use against availability (selection ratio + Ivlev electivity).
+
+    Aligns located detections to a caller-supplied land-cover raster and reports, per class,
+    how much it is used versus how much of the survey area it covers. A selection ratio > 1
+    means the class is used more than its area predicts (preference); < 1 means avoidance.
+    Electivity is the same signal on a bounded −1..+1 scale. Answers 'which habitats do the
+    animals here prefer?'. Read-only.
+
+    Arguments
+    ---------
+    landcover:      Classified raster as a grid — ``origin_lat``, ``origin_lon``, ``step``
+                    (cell size in degrees), and ``rows`` (2-D array of class-label strings).
+                    ``rows[r][c]`` is the class at lat=origin_lat+r*step, lon=origin_lon+c*step.
+    limit:          Max detections to scan (1–50000, default 5000).
+    top_n:          How many top species to list per class (default 3).
+    deployment_id:  Restrict to one deployment (optional).
+    """
+    from clawcam_gateway.analytics.habitat import LandCover, build_habitat_report
+
+    if not isinstance(landcover, dict) or "rows" not in landcover:
+        return {"ok": False, "error": "landcover must be an object with origin_lat, origin_lon, step, rows"}
+    try:
+        lc = LandCover(
+            origin_lat=float(landcover["origin_lat"]),
+            origin_lon=float(landcover["origin_lon"]),
+            step=float(landcover["step"]),
+            rows=[[str(c) for c in row] for row in landcover["rows"]],
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return {"ok": False, "error": f"invalid landcover grid: {exc}"}
+
+    safe_limit = max(1, min(int(limit), 50_000))
+    dets = context.db.list_inference_results(limit=safe_limit, deployment_id=deployment_id)
+    return {
+        "ok": True,
+        "report": build_habitat_report(dets, lc, top_n=int(top_n)),
+    }
+
+
 def get_species_profile(
     context: ToolContext,
     subject: str,

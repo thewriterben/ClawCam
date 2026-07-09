@@ -17,6 +17,7 @@ about.
 | Abundance | `build_abundance_report` | `get_abundance_report` | `GET /api/v1/analytics/abundance` | *How much of each species* per unit effort? (RAI) |
 | Environment | `build_environment_report` | `get_environment_report` | `GET /api/v1/analytics/environment` | *What are the conditions* (temp/humidity/pressure) and their trend? |
 | Weather–activity | `build_weather_activity_report` | `get_weather_activity_report` | `GET /api/v1/analytics/weather-activity` | *Does activity track conditions?* (rate vs temp/humidity/pressure + correlation) |
+| Habitat | `build_habitat_report` | `get_habitat_report` | `POST /api/v1/analytics/habitat` | *Which habitats do the animals prefer?* (use vs land-cover availability — selection ratio + electivity) |
 | Encounters | `build_encounter_report` | `get_encounter_report` | `GET /api/v1/analytics/encounters` | *How many real visits* (not frames)? |
 | Comparison | `build_comparison_report` | `get_comparison_report` | `GET /api/v1/analytics/comparison` | *How does this week compare to last?* |
 | Calibration | `build_calibration_report` | `get_calibration_report` | `GET /api/v1/analytics/calibration` | *Can I trust the model's confidence, and at what threshold?* |
@@ -200,6 +201,7 @@ The pure analytics tests (`test_activity_report.py`, `test_trend_report.py`,
 `test_diversity_report.py`, `test_encounter_report.py`, `test_comparison_report.py`,
 `test_calibration_report.py`, `test_anomaly_report.py`, `test_cooccurrence_report.py`,
 `test_abundance_report.py`, `test_environment_report.py`,
-`test_weather_activity_report.py`, `test_species_profile.py`, `test_site_report.py`,
+`test_weather_activity_report.py`, `test_habitat_report.py`, `test_species_profile.py`,
+`test_site_report.py`,
 `test_boxops.py`, `test_triage.py`) import only their builder module and need no runtime
 dependencies; the tool- and API-level tests exercise the DB and FastAPI paths.
