@@ -1,7 +1,7 @@
 # ClawCam Gateway MCP Server
 
 `stdio_server.py` is a dual-mode MCP stdio server exposing the full gateway
-tool surface: **46 tools — 35 auto-approved reads, 11 approval-gated writes**
+tool surface: **57 tools — 46 auto-approved reads, 11 approval-gated writes**
 (see `docs/standards/mcp-tools.md`, generated from `tool_catalog()`).
 
 It speaks two protocol lifecycles and negotiates per client:
