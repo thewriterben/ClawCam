@@ -33,10 +33,10 @@ PYTHONPATH=. python -m clawcam_gateway.mcp_server.stdio_server --db ../clawcam_g
 ```
 
 The bridge supports `initialize`, `tools/list`, `tools/call`, and `ping`, in both
-`legacy-2024` and `stateless-2026` protocol modes. It exposes 46 tools — 35
+`legacy-2024` and `stateless-2026` protocol modes. It exposes 57 tools — 46
 auto-approved reads (detections, health, analytics reports, review queue,
-calibration, encounters, anomalies, audio, zones, schedules, profiles…) and 11
-approval-gated writes. The full generated catalog is `docs/standards/mcp-tools.md`.
+calibration, encounters, anomalies, audio, zones, schedules, profiles, sites,
+habitat, co-occurrence, weather…) and 11 approval-gated writes. The full generated catalog is `docs/standards/mcp-tools.md`.
 
 ## Tool Policy
 
