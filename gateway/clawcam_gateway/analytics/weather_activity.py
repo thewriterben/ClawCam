@@ -82,9 +82,9 @@ def build_weather_activity_report(
     # Readings that carry the quantity, sorted by time.
     rq = sorted(
         (
-            (_epoch(r.get("timestamp") or ""), float(r[quantity]))
+            (t, float(r[quantity]))
             for r in readings
-            if r.get(quantity) is not None and _epoch(r.get("timestamp") or "") is not None
+            if r.get(quantity) is not None and (t := _epoch(r.get("timestamp") or "")) is not None
         ),
         key=lambda p: p[0],
     )

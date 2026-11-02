@@ -1,5 +1,7 @@
 dependencies:
   espressif/esp32-camera:
     version: ">=2.0.0"
+    # IDF 5.2's component manager only accepts idf_version/target rules, not
+    # Kconfig ones; clawcam_camera.c checks CONFIG_CLAWCAM_CAMERA_USE_ESP_CAMERA itself.
     rules:
-      - if: "CONFIG_CLAWCAM_CAMERA_USE_ESP_CAMERA == y"
+      - if: "target in [esp32, esp32s2, esp32s3]"
