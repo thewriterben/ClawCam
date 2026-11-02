@@ -241,8 +241,8 @@ esp_err_t clawcam_config_reset(clawcam_config_t *config)
     nvs_handle_t h;
     esp_err_t err = open_nvs(&h, NVS_READWRITE);
     if (err != ESP_OK) return err;
-    nvs_erase_namespace(h);  /* clear all keys in the namespace */
-    err = nvs_commit(h);
+    err = nvs_erase_all(h);  /* clear all keys in the namespace */
+    if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     ESP_LOGI(TAG, "config reset to factory defaults");
     return err;
