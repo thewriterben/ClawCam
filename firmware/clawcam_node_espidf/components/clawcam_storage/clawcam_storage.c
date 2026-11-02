@@ -210,7 +210,7 @@ static void cleanup_oldest_media(void)
         if (dir == NULL) {
             return;
         }
-        char oldest[192] = {0};
+        char oldest[280] = {0}; /* same size as candidate: a truncated path would unlink the wrong file */
         time_t oldest_mtime = 0;
         struct dirent *entry;
         while ((entry = readdir(dir)) != NULL) {

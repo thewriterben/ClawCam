@@ -10,7 +10,7 @@
  * Usage:
  *   esp_err_t err = clawcam_ota_update(base_url, "/api/v1/firmware/<id>/download",
  *                                       sha256_hex, "0.3.0");
- *   if (err == ESP_OK) { /* reboot is triggered automatically */ }
+ *   if (err == ESP_OK) { ... }  // reboot is triggered automatically
  */
 
 #include "esp_err.h"
