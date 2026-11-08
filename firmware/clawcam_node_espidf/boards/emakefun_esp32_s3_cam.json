@@ -1,0 +1,87 @@
+{
+  "board_id": "emakefun-esp32-s3-cam",
+  "status": "vendor_pinmap_unverified",
+  "description": "nulllab/emakefun ESP32-S3-CAM (38.4 x 30.4 mm, ESP32-S3R8 with 8 MB octal PSRAM, 8 MB flash, one USB-C on the native USB). Camera and SD pins are vendor-stated and match the ESP32-S3-EYE. One unit run on metal 2026-11-07 under Oh-Ben-Claw firmware (not ClawCam firmware): chip, PSRAM, sensor and camera pins measured; see the camera notes.",
+  "mcu": "esp32-s3",
+  "source_references": [
+    {
+      "title": "nulllab esp32s3-cam README",
+      "url": "https://github.com/nulllaborg/esp32s3-cam",
+      "notes": "Printed to PDF 2026-08-20, on the bench 2026-11-01. \"Camera pin\" table (SDA 4, SCL 5, VSYNC 6, HREF 7, XMCLK 15, PCLK 13, Y2-Y9 11/9/8/10/12/18/17/16, reset not wired, no PWDN), MMC pins (CMD 38, CLK 39, D0 40), flash LED GPIO3, ESP32-S3R8, Arduino setting \"PSRAM: OPI PSRAM\", OV2640 or OV3660."
+    },
+    {
+      "title": "Oh-Ben-Claw bring-up, 2026-11-07",
+      "url": "https://github.com/thewriterben/Oh-Ben-Claw/pull/233",
+      "notes": "Boot log and 6-try capture probe on one unit: results/emakefun_bringup_boot-5a1bb8-20261107.log and results/probe_sense_capture-5a1bb8-20261107-194311.json in that repository."
+    }
+  ],
+  "camera": {
+    "sensor": "ov3660",
+    "sensor_options": [
+      "ov2640",
+      "ov3660"
+    ],
+    "interface": "dvp",
+    "pixel_format": "jpeg",
+    "xclk_hz": 16000000,
+    "default_frame_size": "UXGA",
+    "default_jpeg_quality": 12,
+    "vflip": false,
+    "hflip": false,
+    "pins": {
+      "pwdn": -1,
+      "reset": -1,
+      "xclk": 15,
+      "siod": 4,
+      "sioc": 5,
+      "d0": 11,
+      "d1": 9,
+      "d2": 8,
+      "d3": 10,
+      "d4": 12,
+      "d5": 18,
+      "d6": 17,
+      "d7": 16,
+      "vsync": 6,
+      "href": 7,
+      "pclk": 13
+    },
+    "notes": "Pins are the ESP32-S3-EYE map exactly, so clawcam_camera_default_esp32_s3_eye_config already drives this board; only vflip differs (the EYE mounts its sensor inverted, this board's orientation is unchecked). esp32-camera detects the sensor by PID, so every listed option works with the same pins. xclk_hz follows the EYE profile; not measured on this board. MEASURED 2026-11-07 on one unit (MAC 28:84:85:5A:1B:B8) with Oh-Ben-Claw's board-emakefun-s3-cam build, which uses these same pins: the sensor fitted was an OV3660 (PID 0x3660 at SCCB 0x3C), so `sensor` is ov3660; boot log showed 8 MB AP octal PSRAM at 80 MHz with the memory test OK, and eFuses read PSRAM_CAP 8M / FLASH_CAP None (ESP32-S3R8); 6/6 captures of 320x240 greyscale at 20 MHz XCLK with no VSYNC overflow. The 16 MHz here is still untried. The first frame was upright with no flip, but how the board was held was not recorded, so vflip stays unconfirmed. ClawCam's own firmware, the SD card and the flash LED are not yet run on this board, which is why the status is unchanged."
+  },
+  "storage": {
+    "type": "sdmmc_1bit",
+    "mount_point": "/sdcard",
+    "pins": {
+      "d0": 40,
+      "cmd": 38,
+      "clk": 39,
+      "d1": -1,
+      "d2": -1,
+      "d3": -1,
+      "detect": -1
+    }
+  },
+  "indicators": {
+    "flash_led_gpio": 3,
+    "status_led_gpio": -1,
+    "ws2812_gpio": -1
+  },
+  "motion": {
+    "pir_gpio": -1,
+    "debounce_ms": 2000,
+    "notes": "No PIR on the board. Free header GPIOs per the vendor pinout: 14, 47, 48, 1, 41, 42, 46 (0 is BOOT, 43/44 are UART0). Set pir_gpio to whichever is wired before enabling motion wake."
+  },
+  "power": {
+    "battery_adc_channel": -1,
+    "low_battery_threshold_v": 3.55,
+    "notes": "PH2.0 battery connector with on-board charging per the vendor README. No battery-voltage divider is documented, so ADC-based estimates stay off until one is found or added."
+  },
+  "promotion_requirements": [
+    "ESP-IDF firmware builds with the esp32-camera component enabled.",
+    "Camera initializes and captures a valid JPEG frame on physical nulllab/emakefun ESP32-S3-CAM hardware, with the sensor it actually shipped with recorded here.",
+    "Image orientation is checked and vflip/hflip set to match.",
+    "Captured JPEG can be saved to the onboard MicroSD slot.",
+    "Gateway can ingest metadata generated from the hardware capture path.",
+    "Power and wake behavior are tested before enabling unattended field deployments."
+  ]
+}

@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import json
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -56,6 +58,26 @@ def test_esp32_s3_eye_profile_defines_concrete_camera_pins_but_remains_unverifie
     assert pins["href"] == 7
     assert pins["pclk"] == 13
     assert profile["storage"]["pins"]["d0"] == 40
+    assert any("captures a valid JPEG" in requirement for requirement in profile["promotion_requirements"])
+
+
+@pytest.mark.parametrize(
+    ("filename", "board_id", "sensors"),
+    [
+        ("emakefun_esp32_s3_cam.json", "emakefun-esp32-s3-cam", {"ov2640", "ov3660"}),
+        ("esp32_s3_wroom_cam.json", "esp32-s3-wroom-cam", {"ov2640", "ov5640"}),
+    ],
+)
+def test_boards_added_2026_11_01_share_the_eye_pins_and_remain_unverified(filename, board_id, sensors) -> None:
+    boards = ROOT / "firmware/clawcam_node_espidf/boards"
+    eye = json.loads((boards / "esp32_s3_eye_v22.json").read_text(encoding="utf-8"))
+    profile = json.loads((boards / filename).read_text(encoding="utf-8"))
+    assert profile["board_id"] == board_id
+    assert profile["status"] == "vendor_pinmap_unverified"
+    assert profile["camera"]["pins"] == eye["camera"]["pins"]
+    assert profile["storage"]["pins"] == eye["storage"]["pins"]
+    assert set(profile["camera"]["sensor_options"]) == sensors
+    assert profile["camera"]["sensor"] in sensors
     assert any("captures a valid JPEG" in requirement for requirement in profile["promotion_requirements"])
 
 
