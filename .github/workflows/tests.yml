@@ -26,11 +26,12 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # Linters are pinned so a new release cannot turn main red on its own.
       # Install the real runtime deps so mypy checks against actual
       # fastapi/pydantic types instead of stubless no-ops.
       - name: Install ruff + mypy + runtime deps
         run: |
-          python -m pip install --upgrade pip ruff mypy
+          python -m pip install --upgrade pip ruff==0.16.7 mypy==2.3.1
           python -m pip install -e "gateway/[dev,mqtt]"
 
       - name: Ruff check

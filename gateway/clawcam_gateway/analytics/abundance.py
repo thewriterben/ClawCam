@@ -81,7 +81,7 @@ def build_abundance_report(
         effort = 0
         source = "span"
 
-    species = []
+    species: list[dict[str, Any]] = []
     for subject, count in counts.items():
         rai = round(count / effort * 100.0, 2) if effort > 0 else None
         species.append({

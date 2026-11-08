@@ -71,6 +71,11 @@ filterwarnings = [
 [tool.ruff]
 line-length = 100
 
+[tool.ruff.lint]
+# Pin the rule set this code was written against: newer ruff selects a much wider
+# default (B, UP, I, RUF, ...). Adopting more rules is its own change.
+select = ["E4", "E7", "E9", "F"]
+
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true   # paho, ultralytics, boto3, etc. are optional/untyped
