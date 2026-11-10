@@ -3,6 +3,8 @@
 #include <string.h>
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #if defined(__has_include)
 #  if __has_include("esp_camera.h")
@@ -18,6 +20,20 @@
 #ifndef CONFIG_CLAWCAM_CAMERA_USE_ESP_CAMERA
 #define CONFIG_CLAWCAM_CAMERA_USE_ESP_CAMERA 0
 #endif
+#ifndef CONFIG_CLAWCAM_IRCUT_GPIO_A
+#define CONFIG_CLAWCAM_IRCUT_GPIO_A (-1)
+#endif
+#ifndef CONFIG_CLAWCAM_IRCUT_GPIO_B
+#define CONFIG_CLAWCAM_IRCUT_GPIO_B (-1)
+#endif
+#ifndef CONFIG_CLAWCAM_IRCUT_ENGAGE_ON_A
+#define CONFIG_CLAWCAM_IRCUT_ENGAGE_ON_A 0
+#endif
+#ifndef CONFIG_CLAWCAM_IRCUT_PULSE_MS
+#define CONFIG_CLAWCAM_IRCUT_PULSE_MS 150
+#endif
+
+#define OV5640_PID_VALUE 0x5640
 
 static const char *TAG = "clawcam_camera";
 static bool s_initialized = false;
@@ -39,6 +55,12 @@ esp_err_t clawcam_camera_default_esp32_s3_eye_config(clawcam_camera_config_t *co
     config->grab_latest = true;
     config->vflip = true;
     config->hflip = false;
+    config->ir_cut = (clawcam_camera_ir_cut_t){
+        .gpio_a = CONFIG_CLAWCAM_IRCUT_GPIO_A,
+        .gpio_b = CONFIG_CLAWCAM_IRCUT_GPIO_B,
+        .engage_on_a = CONFIG_CLAWCAM_IRCUT_ENGAGE_ON_A,
+        .pulse_ms = CONFIG_CLAWCAM_IRCUT_PULSE_MS,
+    };
     config->pins = (clawcam_camera_pins_t){
         .pwdn = CLAWCAM_CAMERA_GPIO_NC,
         .reset = CLAWCAM_CAMERA_GPIO_NC,
@@ -66,6 +88,23 @@ esp_err_t clawcam_camera_init(const clawcam_camera_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
     s_config = *config;
+
+    /* The IR-cut pins do not depend on the camera driver, so set them up in
+     * scaffold mode too. Both inputs low is "coast": no current in the coil.
+     * The filter is NOT moved here: after deep sleep it is still where the
+     * last wake left it, and only the caller knows which case this is. */
+    if (clawcam_camera_has_ir_cut()) {
+        gpio_config_t ir_conf = {
+            .pin_bit_mask = (1ULL << s_config.ir_cut.gpio_a) | (1ULL << s_config.ir_cut.gpio_b),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        ESP_ERROR_CHECK(gpio_config(&ir_conf));
+        gpio_set_level(s_config.ir_cut.gpio_a, 0);
+        gpio_set_level(s_config.ir_cut.gpio_b, 0);
+    }
 
 #if CONFIG_CLAWCAM_CAMERA_USE_ESP_CAMERA && CLAWCAM_HAVE_ESP_CAMERA
     camera_config_t camera_config = {
@@ -198,6 +237,91 @@ esp_err_t clawcam_camera_set_flash(bool enabled)
     }
     ESP_LOGI(TAG, "flash set to %s", enabled ? "on" : "off");
     return ESP_OK;
+}
+
+bool clawcam_camera_has_ir_cut(void)
+{
+    return s_config.ir_cut.gpio_a >= 0 && s_config.ir_cut.gpio_b >= 0;
+}
+
+esp_err_t clawcam_camera_set_ir_cut(bool engaged)
+{
+    if (!clawcam_camera_has_ir_cut()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    const bool pulse_a = (engaged == s_config.ir_cut.engage_on_a);
+    const int pulse = pulse_a ? s_config.ir_cut.gpio_a : s_config.ir_cut.gpio_b;
+    const int rest = pulse_a ? s_config.ir_cut.gpio_b : s_config.ir_cut.gpio_a;
+    const int pulse_ms = s_config.ir_cut.pulse_ms > 0 ? s_config.ir_cut.pulse_ms : 150;
+
+    gpio_set_level(rest, 0);
+    gpio_set_level(pulse, 1);
+    vTaskDelay(pdMS_TO_TICKS(pulse_ms));
+    gpio_set_level(pulse, 0);
+    ESP_LOGI(TAG, "IR-cut filter %s", engaged ? "in (day)" : "out (night)");
+    return ESP_OK;
+}
+
+esp_err_t clawcam_camera_read_light(uint32_t *light)
+{
+    if (light == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+#if CONFIG_CLAWCAM_CAMERA_USE_ESP_CAMERA && CLAWCAM_HAVE_ESP_CAMERA
+    sensor_t *sensor = esp_camera_sensor_get();
+    if (sensor == NULL || sensor->get_reg == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (sensor->id.PID != OV5640_PID_VALUE) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    /* OV5640: AVG READOUT 0x56A1, AEC PK REAL GAIN 0x350A/0x350B (1/16),
+     * AEC PK EXPOSURE 0x3500..0x3502 (1/16 line). The capture is JPEG, so the
+     * sensor's own average stands in for a mean computed from pixels. */
+    static const int regs[6] = {0x56A1, 0x350A, 0x350B, 0x3500, 0x3501, 0x3502};
+    int v[6];
+    for (int i = 0; i < 6; i++) {
+        v[i] = sensor->get_reg(sensor, regs[i], 0xff);
+        if (v[i] < 0) {
+            return ESP_FAIL;
+        }
+    }
+    const uint64_t mean = (uint64_t)v[0];
+    const uint64_t gain_x16 = ((uint64_t)(v[1] & 0x03) << 8) | (uint64_t)v[2];
+    const uint64_t exposure_x16 = ((uint64_t)(v[3] & 0x0f) << 16) | ((uint64_t)v[4] << 8) | (uint64_t)v[5];
+    if (gain_x16 == 0 || exposure_x16 == 0) {
+        return ESP_FAIL;
+    }
+    *light = (uint32_t)((1000ULL * 256ULL * mean) / (gain_x16 * exposure_x16));
+    ESP_LOGI(TAG, "light=%lu (avg=%d gain_x16=%llu exposure_x16=%llu)",
+             (unsigned long)*light, v[0],
+             (unsigned long long)gain_x16, (unsigned long long)exposure_x16);
+    return ESP_OK;
+#else
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
+bool clawcam_camera_day_night_observe(clawcam_camera_day_night_t *state, uint32_t light,
+                                      uint32_t night_below, uint32_t day_above, uint8_t dwell)
+{
+    if (state == NULL || day_above <= night_below) {
+        return false;
+    }
+    const bool wants_other = state->night ? (light > day_above) : (light < night_below);
+    if (!wants_other) {
+        state->run = 0;
+        return false;
+    }
+    if (state->run < UINT8_MAX) {
+        state->run++;
+    }
+    if (state->run < (dwell > 0 ? dwell : 1)) {
+        return false;
+    }
+    state->night = state->night ? 0 : 1;
+    state->run = 0;
+    return true;
 }
 
 bool clawcam_camera_is_initialized(void)

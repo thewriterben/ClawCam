@@ -164,3 +164,36 @@ def test_oh_ben_claw_example_config_documents_stdio_bridge() -> None:
     assert "clawcam_gateway.mcp_server.stdio_server" in config
     assert "get_recent_detections" in config
     assert "apply_config_patch" in config
+
+
+def test_camera_component_exposes_ir_cut_day_night_switching() -> None:
+    base = ROOT / "firmware/clawcam_node_espidf"
+    header = (base / "components/clawcam_camera/include/clawcam_camera.h").read_text(encoding="utf-8")
+    source = (base / "components/clawcam_camera/clawcam_camera.c").read_text(encoding="utf-8")
+    kconfig = (base / "components/clawcam_camera/Kconfig").read_text(encoding="utf-8")
+    main_source = (base / "main/main.c").read_text(encoding="utf-8")
+    profile = json.loads((base / "boards/esp32_s3_eye_v22.json").read_text(encoding="utf-8"))
+
+    for symbol in (
+        "clawcam_camera_has_ir_cut",
+        "clawcam_camera_set_ir_cut",
+        "clawcam_camera_read_light",
+        "clawcam_camera_day_night_observe",
+    ):
+        assert symbol in header
+        assert symbol in source
+    for option in (
+        "CLAWCAM_IRCUT_GPIO_A",
+        "CLAWCAM_IRCUT_GPIO_B",
+        "CLAWCAM_IRCUT_ENGAGE_ON_A",
+        "CLAWCAM_DAY_NIGHT_NIGHT_BELOW",
+        "CLAWCAM_DAY_NIGHT_DAY_ABOVE",
+    ):
+        assert f"config {option}" in kconfig
+    # The filter latches through deep sleep, so its record must as well.
+    assert "RTC_DATA_ATTR clawcam_camera_day_night_t" in main_source
+    assert "update_day_night(first_boot)" in main_source
+    # Off until someone picks pins: the EYE has none to spare by default.
+    assert profile["ir_cut"]["gpio_a"] == -1
+    assert profile["ir_cut"]["gpio_b"] == -1
+    assert profile["ir_cut"]["auto_day_night"]["status"] == "estimated_not_measured"

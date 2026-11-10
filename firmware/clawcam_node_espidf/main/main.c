@@ -19,6 +19,7 @@
 #include <sys/time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_attr.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
@@ -551,6 +552,71 @@ static void run_camera_smoke_test(void)
 #endif
 }
 
+/* ── Day/night (IR-cut filter) ──────────────────────────────────────────── */
+
+#ifndef CONFIG_CLAWCAM_DAY_NIGHT_AUTO
+#define CONFIG_CLAWCAM_DAY_NIGHT_AUTO 0
+#endif
+#ifndef CONFIG_CLAWCAM_DAY_NIGHT_NIGHT_BELOW
+#define CONFIG_CLAWCAM_DAY_NIGHT_NIGHT_BELOW 8
+#endif
+#ifndef CONFIG_CLAWCAM_DAY_NIGHT_DAY_ABOVE
+#define CONFIG_CLAWCAM_DAY_NIGHT_DAY_ABOVE 60
+#endif
+#ifndef CONFIG_CLAWCAM_DAY_NIGHT_DWELL
+#define CONFIG_CLAWCAM_DAY_NIGHT_DWELL 2
+#endif
+#define CLAWCAM_DAY_NIGHT_SETTLE_FRAMES 3
+
+/* RTC memory: the filter latches and stays put through deep sleep, so the
+ * record of where it is has to survive deep sleep as well. */
+static RTC_DATA_ATTR clawcam_camera_day_night_t s_day_night;
+
+/* Grab and drop frames so auto-exposure converges before a reading or a shot. */
+static void discard_frames(int count)
+{
+    for (int i = 0; i < count; i++) {
+        clawcam_camera_capture_t scratch;
+        if (clawcam_camera_capture(&scratch) != ESP_OK) {
+            return;
+        }
+        clawcam_camera_release(&scratch);
+    }
+}
+
+/* Once per wake, before any capture. On a cold boot the filter could be in
+ * either position, so it is driven to day and the record reset. */
+static void update_day_night(bool cold_boot)
+{
+    if (!clawcam_camera_has_ir_cut()) {
+        return;
+    }
+    if (cold_boot) {
+        s_day_night = (clawcam_camera_day_night_t){0};
+        clawcam_camera_set_ir_cut(true);
+    }
+#if CONFIG_CLAWCAM_DAY_NIGHT_AUTO
+    discard_frames(CLAWCAM_DAY_NIGHT_SETTLE_FRAMES);
+    uint32_t light = 0;
+    esp_err_t err = clawcam_camera_read_light(&light);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "day/night: no light reading (%s); filter stays %s",
+                 esp_err_to_name(err), s_day_night.night ? "out" : "in");
+        return;
+    }
+    if (clawcam_camera_day_night_observe(&s_day_night, light,
+                                         CONFIG_CLAWCAM_DAY_NIGHT_NIGHT_BELOW,
+                                         CONFIG_CLAWCAM_DAY_NIGHT_DAY_ABOVE,
+                                         CONFIG_CLAWCAM_DAY_NIGHT_DWELL)) {
+        ESP_LOGI(TAG, "day/night: light=%lu, switching to %s",
+                 (unsigned long)light, s_day_night.night ? "night" : "day");
+        clawcam_camera_set_ir_cut(!s_day_night.night);
+        /* The exposure the sensor settled on belongs to the other filter state. */
+        discard_frames(CLAWCAM_DAY_NIGHT_SETTLE_FRAMES);
+    }
+#endif
+}
+
 /* ── Deterministic capture cycle ────────────────────────────────────────── */
 
 static void run_capture_cycle(const char *trigger)
@@ -645,6 +711,7 @@ void app_main(void)
     /* Smoke test runs once on bench / first power-on to validate hardware */
     esp_sleep_wakeup_cause_t wake_cause = esp_sleep_get_wakeup_cause();
     bool first_boot = (wake_cause == ESP_SLEEP_WAKEUP_UNDEFINED);
+    update_day_night(first_boot);
     if (first_boot) {
         run_camera_smoke_test();
     }
