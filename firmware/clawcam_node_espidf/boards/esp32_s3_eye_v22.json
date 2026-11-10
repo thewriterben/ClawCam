@@ -43,6 +43,15 @@
       "pclk": 13
     }
   },
+  "ir_cut": {
+    "driver": "h_bridge_2pin",
+    "gpio_a": -1,
+    "gpio_b": -1,
+    "engage_on_a": true,
+    "pulse_ms": 150,
+    "auto_day_night": {"night_below": 8, "day_above": 60, "dwell_wakes": 2, "status": "estimated_not_measured"},
+    "notes": "Optional. For an OV5640 module with a two-wire IR-cut filter in place of the stock OV2640. The filter wires go to an H-bridge (DRV8833 recommended), whose two inputs go to these GPIOs. Disabled by default because the ESP32-S3-EYE leaves almost no GPIO free; set CONFIG_CLAWCAM_IRCUT_GPIO_A/B after checking the schematic. Automatic switching needs the OV5640. Not run on hardware."
+  },
   "storage": {
     "type": "sdmmc_1bit",
     "mount_point": "/sdcard",

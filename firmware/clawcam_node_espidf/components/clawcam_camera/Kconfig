@@ -25,4 +25,68 @@ config CLAWCAM_CAMERA_SMOKE_TEST_RETRY_COUNT
     help
         Number of capture attempts during the boot-time smoke test.
 
+config CLAWCAM_IRCUT_GPIO_A
+    int "IR-cut filter H-bridge input A GPIO (-1 = no filter)"
+    default -1
+    range -1 48
+    help
+        For a camera module with a two-wire IR-cut filter (for example the
+        OV5640 110 degree module with IR-cut switch). The two filter wires go
+        to an H-bridge output (DRV8833, TB6612, L9110S), never to GPIOs; this
+        is the bridge's first input. Leave both at -1 when there is no filter.
+        The ESP32-S3-EYE has almost no free GPIO: check the schematic before
+        choosing. Boards with the same camera map and a free header can use
+        41 and 42.
+
+config CLAWCAM_IRCUT_GPIO_B
+    int "IR-cut filter H-bridge input B GPIO (-1 = no filter)"
+    default -1
+    range -1 48
+
+config CLAWCAM_IRCUT_ENGAGE_ON_A
+    bool "Pulsing input A puts the filter in (day)"
+    default y
+    help
+        Depends on which way round the two coil wires are. If night pictures
+        look like day pictures and the other way about, flip this or swap the
+        wires.
+
+config CLAWCAM_IRCUT_PULSE_MS
+    int "IR-cut filter pulse length (ms)"
+    default 150
+    range 20 1000
+
+config CLAWCAM_DAY_NIGHT_AUTO
+    bool "Switch the IR-cut filter automatically from scene light"
+    default y
+    depends on CLAWCAM_CAMERA_USE_ESP_CAMERA
+    help
+        One reading per wake, taken from the OV5640's average, gain and
+        exposure registers before the capture. Does nothing unless both IR-cut
+        GPIOs are set and the sensor is an OV5640.
+
+config CLAWCAM_DAY_NIGHT_NIGHT_BELOW
+    int "Go to night when scene light stays below this"
+    default 8
+    range 1 100000
+    depends on CLAWCAM_DAY_NIGHT_AUTO
+    help
+        An estimate, not a measurement. The reading is logged every wake as
+        "light=" so it can be replaced with one.
+
+config CLAWCAM_DAY_NIGHT_DAY_ABOVE
+    int "Go back to day when scene light stays above this"
+    default 60
+    range 2 100000
+    depends on CLAWCAM_DAY_NIGHT_AUTO
+    help
+        Must be well above the night threshold: with the filter out the same
+        scene reads brighter, and too small a gap makes the filter flap.
+
+config CLAWCAM_DAY_NIGHT_DWELL
+    int "Consecutive wakes needed before switching"
+    default 2
+    range 1 20
+    depends on CLAWCAM_DAY_NIGHT_AUTO
+
 endmenu

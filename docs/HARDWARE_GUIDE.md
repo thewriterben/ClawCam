@@ -23,6 +23,14 @@ The first gateway should run Linux, Python 3.11 or later, SQLite, and a local AP
 
 Remote deployments must default to deterministic low-power behavior. Wi-Fi, model inference, LLM calls, and continuous networking must be explicitly enabled by profile and should be disabled automatically under low battery conditions.
 
+## Day/Night Switching (IR-Cut Filter)
+
+Optional, off by default, and not yet run on hardware. It is for an OV5640 module with a two-wire IR-cut filter fitted in place of the stock OV2640.
+
+The filter is a bistable coil and its two wires must go to an H-bridge, not to GPIOs. A DRV8833 breakout is recommended: its inputs have pull-downs, so the coil stays off during boot and deep sleep. Wire AOUT1/AOUT2 to the filter, VM to 5 V, nSLEEP high, grounds common, and AIN1/AIN2 to two free GPIOs. Set those in `CONFIG_CLAWCAM_IRCUT_GPIO_A` and `CONFIG_CLAWCAM_IRCUT_GPIO_B` (menu "ClawCam Camera"). The ESP32-S3-EYE leaves almost no GPIO free, so check its schematic first.
+
+On a cold boot the node pulses the filter in (day). On every wake it reads scene light from the OV5640 (average level divided by gain and exposure, logged as `light=`), and after `CONFIG_CLAWCAM_DAY_NIGHT_DWELL` consecutive wakes below `NIGHT_BELOW` it pulses the filter out; above `DAY_ABOVE` it goes back. The filter and the record of its position both persist through deep sleep. The two thresholds are estimates: read `light=` from the log at dusk and in the dark and replace them. If day and night come out swapped, flip `CONFIG_CLAWCAM_IRCUT_ENGAGE_ON_A` or swap the filter wires.
+
 ## Expansion Policy
 
 New boards should not be listed as supported until they have a documented wiring profile, build configuration, and at least one successful capture-and-ingest test.
